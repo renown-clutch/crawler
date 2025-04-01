@@ -5,12 +5,10 @@ from telegram import Bot
 import json
 from typing import Optional, Dict, Any, Tuple
 
-# Configuration
 BROWSERLESS_WS_ENDPOINT = os.getenv("BROWSERLESS_WS_ENDPOINT")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-# Initialize Telegram bot
 bot = Bot(token=TELEGRAM_BOT_TOKEN)
 
 def is_headless() -> bool:
@@ -109,7 +107,7 @@ async def handle_qr_code_login(page: Page) -> Optional[Dict[str, Any]]:
                 await qr_container.screenshot(path="qr.png")
                 print("New QR code detected and saved as 'qr.png'")
                 await bot.send_photo(chat_id=TELEGRAM_CHAT_ID, photo=open("qr.png", "rb"))
-                os.remove("qr.png")  # Remove the file after sending
+                os.remove("qr.png")
                 previous_qr_content = current_qr_content
             
             await page.wait_for_timeout(1000)
