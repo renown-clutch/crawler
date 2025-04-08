@@ -90,7 +90,7 @@ scheduler = AsyncIOScheduler()
 
 scheduler.add_job(
     check_login_status_job,
-    CronTrigger(minute="*/30"),
+    CronTrigger(minute=0),
     id="check_login_status",
     name="Check Login",
     replace_existing=True,
@@ -99,12 +99,11 @@ scheduler.add_job(
 
 scheduler.add_job(
     crawl_matches_job,
-    CronTrigger(minute="*/30"),
+    CronTrigger(minute="*/10"),
     id="crawl_matches",
     name="Crawl matches",
     replace_existing=True,
-    next_run_time=datetime.now() + timedelta(minutes=1),
-    # next_run_time=datetime.now(),
+    next_run_time=datetime.now() + timedelta(seconds=10),
 )
 
 
@@ -114,7 +113,7 @@ scheduler.add_job(
     id="crawl_banlist",
     name="Crawl banlist",
     replace_existing=True,
-    next_run_time=datetime.now() + timedelta(minutes=1),
+    next_run_time=datetime.now() + timedelta(seconds=15),
 )
 
 
