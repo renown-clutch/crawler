@@ -1,0 +1,11 @@
+.git
+.gitignore
+.env
+.venv
+__pycache__
+*.pyc
+.DS_Store
+.ruff_cache
+nixpack.toml
+Procfile
+README.md 
