@@ -1,0 +1,35 @@
+[phases.setup]
+nixPkgs = [
+    "postgresql",
+    "python3",
+    "python3Packages.pip",
+    "python3Packages.virtualenv",
+    "nodejs",  # Required for playwright
+    "chromium"  # Required for playwright
+]
+
+[phases.install]
+commands = [
+    "pip install -r requirements.txt",
+    "playwright install chromium",
+    "playwright install-deps"
+]
+
+[phases.start]
+command = "python core.py"
+
+[phases.cleanup]
+commands = [
+    "rm -rf .venv",
+    "rm -rf __pycache__",
+    "rm -rf .ruff_cache"
+]
+
+[phases.healthcheck]
+command = "ps aux | grep python | grep core.py || exit 1"
+
+[phases.postdeploy]
+commands = []
+
+[phases.predeploy]
+commands = []
