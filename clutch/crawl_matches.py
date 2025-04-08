@@ -187,7 +187,7 @@ def process_match_data(match_crawl_task: MatchCrawlTask) -> Optional[Match]:
                             leetify_rating = 0
 
                     # Create stat record
-                    stat = Stat.create(
+                    Stat.create(
                         player=player,
                         match=match,
                         team=participant["team"],
