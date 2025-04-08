@@ -49,6 +49,13 @@ COPY . .
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
+ENV PYTHONIOENCODING=utf-8
+
+# Create a script to run the application with proper logging
+RUN echo '#!/bin/bash\n\
+    python -u core.py 2>&1 | tee /app/app.log\n\
+    tail -f /app/app.log' > /app/run.sh && \
+    chmod +x /app/run.sh
 
 # Command to run the application
-CMD ["python", "core.py"] 
+CMD ["/app/run.sh"] 
