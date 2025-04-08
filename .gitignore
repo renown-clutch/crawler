@@ -11,3 +11,4 @@ __pycache__/
 celerybeat-schedule*
 *.sql
 .DS_Store
+*.egg-info
