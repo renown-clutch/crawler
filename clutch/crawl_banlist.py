@@ -1,39 +1,31 @@
 import asyncio
-import os
-import sys
 from datetime import datetime
 from typing import Optional
 from zoneinfo import ZoneInfo
 
-# Add the parent directory to the Python path
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
 from playwright.async_api import BrowserContext, Page
 
-from clutch.core import cleanup_browser, setup_browser
+from clutch.browser_tools import cleanup_browser, setup_browser
 from clutch.models import Ban, Player
 
 
 async def parse_ban_row(row_element, page: Page) -> dict:
     """Parse a single ban row from the ban list table."""
-    # Get player info
+
     player_cell = await row_element.query_selector(".cell.player")
     nickname_element = await player_cell.query_selector(".nickname a")
     nickname = await nickname_element.text_content()
     profile_url = await nickname_element.get_attribute("href")
     steam_id = int(profile_url.split("/")[-1])
 
-    # Get ban category and severity
     category_cell = await row_element.query_selector(".cell.category")
     category = await (await category_cell.query_selector(".name")).text_content()
     severity = await (await category_cell.query_selector(".duration")).text_content()
 
-    # Get the page's timezone
     timezone = await page.evaluate(
         "() => Intl.DateTimeFormat().resolvedOptions().timeZone"
     )
 
-    # Get ban dates
     ban_issued_cell = await row_element.query_selector(".cell.ban-issued")
     ban_issued_text = await (
         await ban_issued_cell.query_selector(".ban-date")
@@ -80,7 +72,6 @@ async def process_ban_page(page: Page, page_number: int) -> list:
     await page.goto(url, timeout=60000)
     await page.wait_for_load_state("networkidle", timeout=60000)
 
-    # Get all ban rows
     rows = await page.query_selector_all(".rows .row")
     bans = []
 
@@ -101,7 +92,6 @@ async def process_new_bans(context: BrowserContext) -> None:
             if not bans:
                 break
 
-            # Check if any of these bans are already in the database
             existing_bans = set()
             for ban in Ban.select():
                 existing_bans.add((ban.player.steam_id, ban.issued_on))
@@ -116,15 +106,12 @@ async def process_new_bans(context: BrowserContext) -> None:
                 print(f"No new bans found on page {current_page}, stopping")
                 break
 
-            # Process new bans
             for ban_data in new_bans:
-                # Get or create player
                 player, _ = Player.get_or_create(
                     steam_id=ban_data["steam_id"],
                     defaults={"name": ban_data["nickname"]},
                 )
 
-                # Create ban
                 Ban.create(
                     player=player,
                     category=ban_data["category"],
@@ -135,7 +122,6 @@ async def process_new_bans(context: BrowserContext) -> None:
                 )
                 print(f"Added new ban for {ban_data['nickname']}")
 
-            # Check if there's a next page
             next_button = await page.query_selector(
                 'button.text-button:has-text("Next")'
             )

@@ -28,7 +28,7 @@ peewee==3.17.9
 peewee-async==1.1.0
 peewee-db-evolve==3.7.6
 platformdirs==4.3.7
-playwright==1.51.0
+playwright>=1.40.0
 prometheus_client==0.21.1
 prompt_toolkit==3.0.50
 psycopg2-binary==2.9.10

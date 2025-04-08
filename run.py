@@ -3,7 +3,7 @@ from typing import Optional
 
 from playwright.async_api import Page
 
-from clutch.core import cleanup_browser, login_to_renown, setup_browser
+from clutch.browser_tools import cleanup_browser, login_to_renown, setup_browser
 from clutch.models import MatchCrawlTask
 from clutch.tasks import crawl_match
 

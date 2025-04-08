@@ -1,9 +1,8 @@
-import asyncio
 from typing import Optional
 
 from playwright.async_api import BrowserContext, Error, Page
 
-from clutch.core import cleanup_browser, setup_browser
+from clutch.browser_tools import cleanup_browser, setup_browser
 from clutch.models import UserCrawlTask
 
 
@@ -100,25 +99,3 @@ async def crawl_user(
             await cleanup_browser(playwright, browser)
     else:
         return await crawl_single_user(steam_id, context)
-
-
-def main():
-    """Main function to run the user crawler."""
-    import sys
-
-    if len(sys.argv) != 2:
-        print("Usage: python -m clutch.crawl_user <steam_id>")
-        sys.exit(1)
-
-    try:
-        steam_id = int(sys.argv[1])
-    except ValueError:
-        print("Error: Steam ID must be a valid integer")
-        sys.exit(1)
-
-    result = asyncio.run(crawl_user(steam_id))
-    print(result)
-
-
-if __name__ == "__main__":
-    main()

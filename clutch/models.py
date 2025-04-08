@@ -55,7 +55,7 @@ class Player(BaseModel):
 
 
 class Match(BaseModel):
-    match_id = IntegerField(unique=True)
+    id = IntegerField(primary_key=True)
     season = TextField(null=False)
     map = TextField(null=False)
     team1_score = IntegerField(default=0)
@@ -149,8 +149,6 @@ class UserCrawlTask(BaseModel):
     processed = BooleanField(default=False)
     created_at = DateTimeTZField(default=now)
     page_html = TextField(null=False)
-    error_occured = BooleanField(default=False)
-    parsed_user_json = BinaryJSONField(default=None, null=True)
 
     class Meta:
         table_name = "user_crawl_task"

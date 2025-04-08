@@ -1,14 +1,9 @@
-import os
 import re
-import sys
 from datetime import datetime
 from typing import Dict, Optional
 from zoneinfo import ZoneInfo
 
 from bs4 import BeautifulSoup
-
-# Add the parent directory to the Python path
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from clutch.models import Player, UserCrawlTask
 
@@ -75,17 +70,9 @@ def extract_user_data(html_content: str) -> Optional[Dict]:
 
 
 def main():
-    # task = (
-    #     UserCrawlTask.select()
-    #     .where(UserCrawlTask.steam_id == 76561198000000000)
-    #     .first()
-    # )
-    # user_data = extract_user_data(task.page_html)
-    # print(f"User data: {user_data}")
     """Process all unprocessed UserCrawlTask entries."""
     unprocessed_tasks = UserCrawlTask.select().where(
-        (UserCrawlTask.processed == False)  # noqa: E712
-        & (UserCrawlTask.error_occured == False)  # noqa: E712
+        UserCrawlTask.processed == False  # noqa: E712
     )
 
     for task in unprocessed_tasks:
@@ -94,9 +81,7 @@ def main():
         user_data = extract_user_data(task.page_html)
 
         if user_data:
-            # print(f"User data: {user_data}")
-            # Update or create player
-            player, created = Player.get_or_create(
+            Player.get_or_create(
                 steam_id=task.steam_id,
                 defaults={
                     "name": user_data["name"],
