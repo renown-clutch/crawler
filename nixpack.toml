@@ -10,13 +10,14 @@ nixPkgs = [
 
 [phases.install]
 commands = [
-    "pip install -r requirements.txt",
+    "python -m venv --copies /opt/venv",
+    ". /opt/venv/bin/activate && pip install -r requirements.txt",
     "playwright install chromium",
     "playwright install-deps"
 ]
 
 [phases.start]
-command = "python core.py"
+command = ". /opt/venv/bin/activate && python core.py"
 
 [phases.cleanup]
 commands = [
