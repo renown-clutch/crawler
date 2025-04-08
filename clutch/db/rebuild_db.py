@@ -2,7 +2,7 @@ import asyncio
 import logging
 
 from clutch.crawl_matches import process_match_data
-from clutch.models import (
+from clutch.db.models import (
     Ban,
     Drop,
     Match,

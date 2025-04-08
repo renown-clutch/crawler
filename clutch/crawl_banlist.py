@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo
 from playwright.async_api import BrowserContext, Page
 
 from clutch.browser_tools import cleanup_browser, setup_browser
-from clutch.models import Ban, Player
+from clutch.db.models import Ban, Player
 
 
 async def parse_ban_row(row_element, page: Page) -> dict:

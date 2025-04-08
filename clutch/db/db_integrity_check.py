@@ -1,4 +1,4 @@
-from clutch.models import Match, MatchCrawlTask, Stat
+from clutch.db.models import Match, MatchCrawlTask, Stat
 
 
 def check_db_integrity():
@@ -10,7 +10,7 @@ def check_db_integrity():
 
     # Check 1: Match-task correspondence
     print("\nChecking match-task correspondence...")
-    match_ids = {m.match_id for m in matches}
+    match_ids = {m.id for m in matches}
     task_match_ids = {t.match_id for t in crawl_tasks}
 
     # Find tasks without matches
@@ -41,9 +41,9 @@ def check_db_integrity():
 
     matches_with_wrong_stats = []
     for match in matches:
-        stats_count = stats_by_match.get(match.match_id, 0)
+        stats_count = stats_by_match.get(match.id, 0)
         if stats_count != 10:
-            matches_with_wrong_stats.append((match.match_id, stats_count))
+            matches_with_wrong_stats.append((match.id, stats_count))
 
     if matches_with_wrong_stats:
         print("Found matches with incorrect number of stats:")
@@ -55,8 +55,8 @@ def check_db_integrity():
     # Check 3: Match ID gaps
     print("\nChecking for match ID gaps...")
     if matches:
-        min_match_id = min(m.match_id for m in matches)
-        max_match_id = max(m.match_id for m in matches)
+        min_match_id = min(m.id for m in matches)
+        max_match_id = max(m.id for m in matches)
         expected_match_ids = set(range(min_match_id, max_match_id + 1))
         missing_match_ids = expected_match_ids - match_ids
 

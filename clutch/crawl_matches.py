@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 from playwright.async_api import BrowserContext, Page
 
 from clutch.browser_tools import cleanup_browser, setup_browser
-from clutch.models import Drop, Match, MatchCrawlTask, Player, Stat, db
+from clutch.db.models import Drop, Match, MatchCrawlTask, Player, Stat, db
 
 logger = logging.getLogger(__name__)
 
