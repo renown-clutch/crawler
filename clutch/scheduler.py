@@ -99,7 +99,7 @@ scheduler.add_job(
 
 scheduler.add_job(
     crawl_matches_job,
-    CronTrigger(minute="*/10"),
+    CronTrigger(minute="*/5"),
     id="crawl_matches",
     name="Crawl matches",
     replace_existing=True,
