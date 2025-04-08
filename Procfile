@@ -1,0 +1,1 @@
+web: . /opt/venv/bin/activate && python core.py 

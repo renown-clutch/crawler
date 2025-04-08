@@ -16,9 +16,6 @@ commands = [
     "playwright install-deps"
 ]
 
-[phases.start]
-command = ". /opt/venv/bin/activate && python core.py"
-
 [phases.cleanup]
 commands = [
     "rm -rf .venv",
