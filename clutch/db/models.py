@@ -137,7 +137,7 @@ class MatchCrawlTask(BaseModel):
     created_at = DateTimeTZField(default=now)
     page_html = TextField(null=False)
     error_occured = BooleanField(default=False)
-    match_status = TextField(null=False)
+    match_status = TextField(null=True)
     parsed_match_json = BinaryJSONField(default=None, null=True)
 
     class Meta:
@@ -164,6 +164,17 @@ class Ban(BaseModel):
 
     class Meta:
         table_name = "ban"
+
+
+class FaceitProfile(BaseModel):
+    player = ForeignKeyField(Player, backref="faceit_profile")
+    faceit_url = TextField(null=False, unique=True)
+    faceit_elo = IntegerField(null=True)
+    faceit_json = BinaryJSONField(default=None, null=False)
+    last_updated_at = DateTimeTZField(default=now)
+
+    class Meta:
+        table_name = "faceit_profile"
 
 
 if config("EVOLVE", default=False, cast=bool):

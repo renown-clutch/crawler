@@ -1,0 +1,71 @@
+import logging
+from datetime import datetime, timedelta, timezone
+
+import requests
+from decouple import config
+from fastapi import FastAPI
+
+from clutch.db.models import FaceitProfile, Player
+
+logger = logging.getLogger(__name__)
+
+FACEIT_API_KEY = config("FACEIT_API_KEY")
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+
+def get_faceit_profile(steam_id: int):
+    logger.info(f"Getting faceit profile for {steam_id}")
+    url = f"https://open.faceit.com/data/v4/players?game=cs2&game_player_id={steam_id}"
+    headers = {"Authorization": f"Bearer {FACEIT_API_KEY}"}
+    response = requests.get(url, headers=headers)
+    return response.json()
+
+
+app = FastAPI()
+
+
+@app.get("/get_user_faceit")
+async def get_user_faceit(steam_id: int):
+    player = Player.select().where(Player.steam_id == steam_id).first()
+    if player is None:
+        logger.info("User doesnt exist in db, falling back to no caching")
+        data = get_faceit_profile(steam_id)
+        return data
+    faceit_profile = FaceitProfile.select().where(FaceitProfile.player == player)
+
+    if faceit_profile.count() == 0:
+        logger.info(f"No faceit profile found for {steam_id}, creating profile")
+        faceit_json = get_faceit_profile(steam_id)
+        faceit_profile = FaceitProfile.create(
+            player=player,
+            faceit_json=faceit_json,
+            faceit_url=faceit_json["faceit_url"],
+            faceit_elo=faceit_json["games"]["cs2"]["faceit_elo"],
+        )
+
+    else:
+        logger.info(f"Faceit profile found for {steam_id}")
+        faceit_profile = faceit_profile.first()
+        current_time = datetime.now(timezone.utc)
+        if faceit_profile.last_updated_at < current_time - timedelta(hours=5):
+            logger.info(f"Updating faceit outdated profile for {steam_id}")
+            faceit_json = get_faceit_profile(steam_id)
+            FaceitProfile.update(faceit_json=faceit_json).where(
+                FaceitProfile.player == player
+            ).execute()
+    return faceit_profile.faceit_json
+
+
+@app.get("/get_user_faceit_elo")
+async def get_user_faceit_elo(steam_id: int):
+    faceit_data = await get_user_faceit(steam_id)
+    return faceit_data.faceit_elo
+
+
+@app.get("/get_user_faceit_url")
+async def get_user_faceit_url(steam_id: int):
+    faceit_data = await get_user_faceit(steam_id)
+    url = faceit_data["faceit_url"].replace("{lang}/", "")
+    return url
