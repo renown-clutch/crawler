@@ -5,7 +5,7 @@ import requests
 from decouple import config
 from fastapi import FastAPI
 
-from clutch.db.models import FaceitProfile, Player
+from clutch.db.models import Ban, Drop, FaceitProfile, Player
 
 logger = logging.getLogger(__name__)
 
@@ -69,3 +69,61 @@ async def get_user_faceit_url(steam_id: int):
     faceit_data = await get_user_faceit(steam_id)
     url = faceit_data["faceit_url"].replace("{lang}/", "")
     return url
+
+
+@app.get("/get_user_bans")
+async def get_user_bans(steam_id: int):
+    logger.info(f"Getting bans for user {steam_id}")
+    player = Player.select().where(Player.steam_id == steam_id).first()
+
+    if player is None:
+        logger.info(f"No player found with steam_id {steam_id}")
+        return {"bans": []}
+
+    bans = Ban.select().where(Ban.player == player).order_by(Ban.issued_on.desc())
+
+    result = {
+        "bans": [
+            {
+                "category": ban.category,
+                "severity": ban.severity,
+                "issued_on": ban.issued_on.isoformat(),
+                "expires_on": ban.expires_on.isoformat() if ban.expires_on else None,
+                "permanent": ban.permanent,
+            }
+            for ban in bans
+        ]
+    }
+
+    return result
+
+
+@app.get("/get_user_drops")
+async def get_user_drops(steam_id: int):
+    logger.info(f"Getting drops for user {steam_id}")
+    player = Player.select().where(Player.steam_id == steam_id).first()
+    if player is None:
+        logger.info(f"No player found with steam_id {steam_id}")
+        return {"drops": []}
+    drops = Drop.select().where(Drop.player == player).order_by(Drop.id.desc())
+
+    result = {
+        "drops": [
+            {
+                "skin_name": drop.skin_name,
+                "asset_id": drop.asset_id,
+                "icon_hash": drop.icon_hash,
+                "exterior": drop.exterior,
+                "doppler_phase": drop.doppler_phase,
+                "buff_price": drop.buff_price,
+                "name_color": drop.name_color,
+                "float_value": drop.float_value,
+                "rarity_name": drop.rarity_name,
+                "steam_market_price": drop.steam_market_price,
+                "match_id": drop.match.id if drop.match else None,
+            }
+            for drop in drops
+        ]
+    }
+
+    return result

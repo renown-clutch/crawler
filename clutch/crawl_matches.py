@@ -69,13 +69,24 @@ def extract_match_data(html_content: str) -> Optional[dict]:
 def create_or_update_player(user_data: Dict) -> Player:
     """Create or update a player from match data."""
     steam_id = int(user_data["steam_id"])
+
+    player_country = user_data["country"]
+    if player_country is None:
+        player_country = "unknown"
+    else:
+        player_country = player_country["alpha2"]
+
+    player_avatar_url = user_data["steam_avatar"]
+    if not player_avatar_url.startswith("https://"):
+        player_avatar_url = ""
+
     player, created = Player.get_or_create(
         steam_id=steam_id,
         defaults={
             "name": user_data["nickname"],
             "elo": user_data["elo_rating"],
-            "country": user_data["country"]["alpha2"],
-            "avatar_url": user_data["steam_avatar"],
+            "country": player_country,
+            "avatar_url": player_avatar_url,
         },
     )
 
@@ -86,10 +97,10 @@ def create_or_update_player(user_data: Dict) -> Player:
             player.name = user_data["nickname"]
         if player.elo != user_data["elo_rating"]:
             player.elo = user_data["elo_rating"]
-        if player.country != user_data["country"]["alpha2"]:
-            player.country = user_data["country"]["alpha2"]
-        if player.avatar_url != user_data["steam_avatar"]:
-            player.avatar_url = user_data["steam_avatar"]
+        if player.country != player_country:
+            player.country = player_country
+        if player.avatar_url != player_avatar_url:
+            player.avatar_url = player_avatar_url
         player.save()
 
     return player
@@ -120,7 +131,7 @@ def process_match_data(match_crawl_task: MatchCrawlTask) -> Optional[Match]:
             team2_current_score = 0
 
     match_id = match_data["id"]
-    match, _ = Match.get_or_create(
+    match, created = Match.get_or_create(
         id=match_id,  # Use the Renown match ID as the primary key
         defaults={
             "season": match_data["season"]["name"],
