@@ -76,7 +76,7 @@ async def get_user_faceit_url(steam_id: int):
 async def get_user_faceit_elo_and_url(steam_id: int):
     faceit_data = await get_user_faceit(steam_id)
     return {
-        "elo": faceit_data["games"]["cs2"]["faceit_elo"],
+        "elo": faceit_data["games"]["cs2"]["faceit_elo"].replace("{lang}/", ""),
         "url": faceit_data["faceit_url"],
     }
 
