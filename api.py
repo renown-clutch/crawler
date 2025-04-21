@@ -72,6 +72,15 @@ async def get_user_faceit_url(steam_id: int):
     return url
 
 
+@app.get("/get_user_faceit_elo_and_url")
+async def get_user_faceit_elo_and_url(steam_id: int):
+    faceit_data = await get_user_faceit(steam_id)
+    return {
+        "elo": faceit_data.faceit_elo,
+        "url": faceit_data.faceit_url,
+    }
+
+
 @app.get("/get_user_bans")
 async def get_user_bans(steam_id: int):
     logger.info(f"Getting bans for user {steam_id}")
