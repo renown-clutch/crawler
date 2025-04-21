@@ -160,3 +160,23 @@ async def get_users_ranks(request: RankRequest):
         results[player.steam_id] = player.elo
 
     return results
+
+
+@app.post("/get_users_faceit_elo_and_url")
+async def get_users_faceit_elo_and_url(request: RankRequest):
+    steam_ids = request.steam_ids
+    logger.info(f"Getting faceit elo and url for users: {steam_ids}")
+    results = {}
+
+    for steam_id in steam_ids:
+        try:
+            faceit_data = await get_user_faceit(steam_id)
+            results[steam_id] = {
+                "elo": faceit_data["games"]["cs2"]["faceit_elo"],
+                "url": faceit_data["faceit_url"].replace("{lang}/", ""),
+            }
+        except Exception as e:
+            logger.error(f"Error getting faceit data for {steam_id}: {str(e)}")
+            results[steam_id] = None
+
+    return results
