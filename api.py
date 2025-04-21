@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 import requests
 from decouple import config
 from fastapi import FastAPI
+from pydantic import BaseModel
 
 from clutch.db.models import Ban, Drop, FaceitProfile, Player
 
@@ -127,3 +128,26 @@ async def get_user_drops(steam_id: int):
     }
 
     return result
+
+
+class RankRequest(BaseModel):
+    steam_ids: list[int]
+
+
+@app.post("/get_users_ranks")
+async def get_users_ranks(request: RankRequest):
+    steam_ids = request.steam_ids
+    logger.info(f"Getting ranks for users: {steam_ids}")
+    results = {steam_id: None for steam_id in steam_ids}
+
+    if not steam_ids:
+        return results
+
+    players = Player.select(Player.steam_id, Player.elo).where(
+        Player.steam_id.in_(steam_ids)
+    )
+
+    for player in players:
+        results[player.steam_id] = player.elo
+
+    return results
