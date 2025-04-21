@@ -62,7 +62,7 @@ async def get_user_faceit(steam_id: int):
 @app.get("/get_user_faceit_elo")
 async def get_user_faceit_elo(steam_id: int):
     faceit_data = await get_user_faceit(steam_id)
-    return faceit_data.faceit_elo
+    return faceit_data["games"]["cs2"]["faceit_elo"]
 
 
 @app.get("/get_user_faceit_url")
@@ -76,8 +76,8 @@ async def get_user_faceit_url(steam_id: int):
 async def get_user_faceit_elo_and_url(steam_id: int):
     faceit_data = await get_user_faceit(steam_id)
     return {
-        "elo": faceit_data.faceit_elo,
-        "url": faceit_data.faceit_url,
+        "elo": faceit_data["games"]["cs2"]["faceit_elo"],
+        "url": faceit_data["faceit_url"],
     }
 
 
