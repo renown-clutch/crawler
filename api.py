@@ -39,11 +39,12 @@ async def get_user_faceit(steam_id: int):
     if faceit_profile.count() == 0:
         logger.info(f"No faceit profile found for {steam_id}, creating profile")
         faceit_json = get_faceit_profile(steam_id)
+        faceit_elo = faceit_json.get("games", {}).get("cs2", {}).get("faceit_elo", None)
         faceit_profile = FaceitProfile.create(
             player=player,
             faceit_json=faceit_json,
-            faceit_url=faceit_json["faceit_url"],
-            faceit_elo=faceit_json["games"]["cs2"]["faceit_elo"],
+            faceit_url=faceit_json.get("faceit_url", ""),
+            faceit_elo=faceit_elo,
         )
 
     else:
@@ -62,22 +63,27 @@ async def get_user_faceit(steam_id: int):
 @app.get("/get_user_faceit_elo")
 async def get_user_faceit_elo(steam_id: int):
     faceit_data = await get_user_faceit(steam_id)
-    return faceit_data["games"]["cs2"]["faceit_elo"]
+    return faceit_data.get("games", {}).get("cs2", {}).get("faceit_elo", None)
 
 
 @app.get("/get_user_faceit_url")
 async def get_user_faceit_url(steam_id: int):
     faceit_data = await get_user_faceit(steam_id)
-    url = faceit_data["faceit_url"].replace("{lang}/", "")
+    url = faceit_data.get("faceit_url", "")
+    if url:
+        url = url.replace("{lang}/", "")
     return url
 
 
 @app.get("/get_user_faceit_elo_and_url")
 async def get_user_faceit_elo_and_url(steam_id: int):
     faceit_data = await get_user_faceit(steam_id)
+    url = faceit_data.get("faceit_url", "")
+    if url:
+        url = url.replace("{lang}/", "")
     return {
-        "elo": faceit_data["games"]["cs2"]["faceit_elo"],
-        "url": faceit_data["faceit_url"].replace("{lang}/", ""),
+        "elo": faceit_data.get("games", {}).get("cs2", {}).get("faceit_elo", None),
+        "url": url,
     }
 
 
@@ -171,9 +177,14 @@ async def get_users_faceit_elo_and_url(request: RankRequest):
     for steam_id in steam_ids:
         try:
             faceit_data = await get_user_faceit(steam_id)
+            url = faceit_data.get("faceit_url", "")
+            if url:
+                url = url.replace("{lang}/", "")
             results[steam_id] = {
-                "elo": faceit_data["games"]["cs2"]["faceit_elo"],
-                "url": faceit_data["faceit_url"].replace("{lang}/", ""),
+                "elo": faceit_data.get("games", {})
+                .get("cs2", {})
+                .get("faceit_elo", None),
+                "url": url,
             }
         except Exception as e:
             logger.error(f"Error getting faceit data for {steam_id}: {str(e)}")
