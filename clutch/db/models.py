@@ -41,9 +41,9 @@ class BaseModel(Model):
 
 
 class Player(BaseModel):
-    steam_id = BigIntegerField(unique=True)
+    steam_id = BigIntegerField(unique=True, index=True)
     name = TextField(null=False, unique=True)
-    elo = IntegerField(default=-1)
+    elo = IntegerField(default=-1, index=True)
     country = TextField(null=True)
     registered_since = DateTimeTZField(null=True)
     avatar_url = TextField(null=True)
@@ -52,6 +52,10 @@ class Player(BaseModel):
 
     class Meta:
         table_name = "player"
+        indexes = (
+            (("steam_id",), True),  # True for unique index
+            (("elo",), False),  # False for non-unique index
+        )
 
 
 class Match(BaseModel):
@@ -81,11 +85,16 @@ class Match(BaseModel):
 
     class Meta:
         table_name = "match"
+        indexes = (
+            (("finished",), False),
+            (("season",), False),
+            (("status",), False),
+        )
 
 
 class Stat(BaseModel):
-    player = ForeignKeyField(Player, backref="stats")
-    match = ForeignKeyField(Match, backref="stats")
+    player = ForeignKeyField(Player, backref="stats", index=True)
+    match = ForeignKeyField(Match, backref="stats", index=True)
     team = TextField(null=False)
     kicked = BooleanField(default=False)
     kills = IntegerField(default=0)
@@ -110,11 +119,15 @@ class Stat(BaseModel):
 
     class Meta:
         table_name = "stat"
+        indexes = (
+            (("player_id", "match_id"), False),
+            (("elo_change",), False),
+        )
 
 
 class Drop(BaseModel):
-    player = ForeignKeyField(Player, backref="drops")
-    match = ForeignKeyField(Match, backref="drops")
+    player = ForeignKeyField(Player, backref="drops", index=True)
+    match = ForeignKeyField(Match, backref="drops", index=True)
     skin_name = TextField(null=False)
     asset_id = TextField(null=True)
     icon_hash = TextField(null=True)
@@ -128,6 +141,10 @@ class Drop(BaseModel):
 
     class Meta:
         table_name = "drop"
+        indexes = (
+            (("player_id", "match_id"), False),
+            (("skin_name",), False),
+        )
 
 
 class MatchCrawlTask(BaseModel):
@@ -155,26 +172,36 @@ class UserCrawlTask(BaseModel):
 
 
 class Ban(BaseModel):
-    player = ForeignKeyField(Player, backref="bans")
+    player = ForeignKeyField(Player, backref="bans", index=True)
     category = TextField(null=False)
     severity = TextField(null=False)
-    issued_on = DateTimeTZField(null=False)
+    issued_on = DateTimeTZField(null=False, index=True)
     expires_on = DateTimeTZField(null=True)
     permanent = BooleanField(default=False)
 
     class Meta:
         table_name = "ban"
+        indexes = (
+            (("player_id",), False),
+            (("issued_on",), False),
+            (("player_id", "issued_on"), False),
+        )
 
 
 class FaceitProfile(BaseModel):
-    player = ForeignKeyField(Player, backref="faceit_profile")
+    player = ForeignKeyField(Player, backref="faceit_profile", index=True)
     faceit_url = TextField(null=False, unique=True)
-    faceit_elo = IntegerField(null=True)
+    faceit_elo = IntegerField(null=True, index=True)
     faceit_json = BinaryJSONField(default=None, null=False)
-    last_updated_at = DateTimeTZField(default=now)
+    last_updated_at = DateTimeTZField(default=now, index=True)
 
     class Meta:
         table_name = "faceit_profile"
+        indexes = (
+            (("player_id",), True),  # One-to-one relationship with Player
+            (("faceit_elo",), False),
+            (("last_updated_at",), False),
+        )
 
 
 if config("EVOLVE", default=False, cast=bool):
