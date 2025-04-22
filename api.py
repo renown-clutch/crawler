@@ -106,6 +106,11 @@ async def get_user_bans(steam_id: int):
                 "issued_on": ban.issued_on.isoformat(),
                 "expires_on": ban.expires_on.isoformat() if ban.expires_on else None,
                 "permanent": ban.permanent,
+                "duration_days": None
+                if ban.permanent
+                else (ban.expires_on - ban.issued_on).days
+                if ban.expires_on
+                else None,
             }
             for ban in bans
         ]
