@@ -1,3 +1,6 @@
+import asyncio
+import hashlib
+import json
 import logging
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache
@@ -23,6 +26,19 @@ def get_faceit_profile(steam_id: int):
     headers = {"Authorization": f"Bearer {FACEIT_API_KEY}"}
     response = requests.get(url, headers=headers)
     return response.json()
+
+
+# Cache for batch requests with steam_ids as key
+batch_cache = {}
+BATCH_CACHE_TTL = 300  # 5 minutes in seconds
+
+
+# Generate a consistent hash for a list of steam IDs
+def hash_steam_ids(steam_ids):
+    # Sort to ensure consistent hash regardless of order
+    sorted_ids = sorted(steam_ids)
+    hash_input = json.dumps(sorted_ids)
+    return hashlib.md5(hash_input.encode()).hexdigest()
 
 
 # Cache faceit profile requests for 5 minutes (300 seconds)
@@ -197,16 +213,51 @@ async def get_users_ranks(request: RankRequest):
 async def get_users_faceit_elo_and_url(request: RankRequest):
     steam_ids = request.steam_ids
     logger.info(f"Getting faceit elo and url for users: {steam_ids}")
-    results = {}
 
-    for steam_id in steam_ids:
+    # Check if we have a cached result for this exact set of steam_ids
+    cache_key = hash_steam_ids(steam_ids)
+    if cache_key in batch_cache:
+        cache_entry = batch_cache[cache_key]
+        current_time = datetime.now(timezone.utc).timestamp()
+        if current_time < cache_entry["expires"]:
+            logger.info(f"Cache hit for batch request with {len(steam_ids)} steam_ids")
+            return cache_entry["data"]
+
+    # Process requests concurrently
+    async def fetch_single_user(steam_id):
         try:
-            # Use the cached version to get faceit data
-            faceit_data = await get_user_faceit(steam_id)
+            # Get player from db
+            player = Player.select().where(Player.steam_id == steam_id).first()
+
+            if player is None:
+                # User not in DB, fetch directly from faceit
+                faceit_data = get_faceit_profile_cached(steam_id)
+            else:
+                # Check if we have a profile in DB
+                faceit_profile = (
+                    FaceitProfile.select().where(FaceitProfile.player == player).first()
+                )
+
+                if faceit_profile is None:
+                    # No profile, fetch from faceit
+                    faceit_data = get_faceit_profile_cached(steam_id)
+                else:
+                    # Check if profile is outdated
+                    current_time = datetime.now(timezone.utc)
+                    if faceit_profile.last_updated_at < current_time - timedelta(
+                        hours=5
+                    ):
+                        # Outdated, update from faceit
+                        faceit_data = get_faceit_profile_cached(steam_id)
+                    else:
+                        # Use existing profile data
+                        faceit_data = faceit_profile.faceit_json
+
             url = faceit_data.get("faceit_url", "")
             if url:
                 url = url.replace("{lang}/", "")
-            results[steam_id] = {
+
+            return steam_id, {
                 "elo": faceit_data.get("games", {})
                 .get("cs2", {})
                 .get("faceit_elo", None),
@@ -214,16 +265,36 @@ async def get_users_faceit_elo_and_url(request: RankRequest):
             }
         except Exception as e:
             logger.error(f"Error getting faceit data for {steam_id}: {str(e)}")
-            results[steam_id] = None
+            return steam_id, None
+
+    # Use asyncio.gather to process all requests concurrently
+    tasks = [fetch_single_user(steam_id) for steam_id in steam_ids]
+    results_list = await asyncio.gather(*tasks)
+
+    # Convert the results to a dictionary
+    results = {steam_id: data for steam_id, data in results_list}
+
+    # Cache the results
+    batch_cache[cache_key] = {
+        "data": results,
+        "expires": datetime.now(timezone.utc).timestamp() + BATCH_CACHE_TTL,
+    }
 
     return results
 
 
 # Add an endpoint to manually clear the cache if needed
 @app.post("/clear_faceit_cache")
-async def api_clear_faceit_cache(steam_id: int = None):
-    clear_faceit_cache(steam_id)
-    return {
-        "status": "success",
-        "message": f"Cache cleared for {'all users' if steam_id is None else f'steam_id {steam_id}'}",
-    }
+async def api_clear_faceit_cache(steam_id: int = None, clear_batch: bool = False):
+    if steam_id:
+        get_faceit_profile_cached.cache_clear()
+        logger.info(f"Cleared faceit cache for {steam_id}")
+    elif clear_batch:
+        batch_cache.clear()
+        logger.info("Cleared entire batch cache")
+    else:
+        get_faceit_profile_cached.cache_clear()
+        batch_cache.clear()
+        logger.info("Cleared all faceit caches")
+
+    return {"status": "success", "message": "Cache cleared successfully"}
