@@ -1,5 +1,6 @@
 import logging
 from datetime import datetime, timedelta, timezone
+from functools import lru_cache
 
 import requests
 from decouple import config
@@ -24,6 +25,23 @@ def get_faceit_profile(steam_id: int):
     return response.json()
 
 
+# Cache faceit profile requests for 5 minutes (300 seconds)
+@lru_cache(maxsize=128)
+def get_faceit_profile_cached(steam_id: int):
+    logger.info(f"Cache miss for faceit profile {steam_id}")
+    return get_faceit_profile(steam_id)
+
+
+# Function to clear specific cache entries
+def clear_faceit_cache(steam_id: int = None):
+    if steam_id:
+        get_faceit_profile_cached.cache_clear()
+        logger.info(f"Cleared faceit cache for {steam_id}")
+    else:
+        get_faceit_profile_cached.cache_clear()
+        logger.info("Cleared entire faceit cache")
+
+
 app = FastAPI()
 
 
@@ -38,7 +56,7 @@ async def get_user_faceit(steam_id: int):
 
     if faceit_profile.count() == 0:
         logger.info(f"No faceit profile found for {steam_id}, creating profile")
-        faceit_json = get_faceit_profile(steam_id)
+        faceit_json = get_faceit_profile_cached(steam_id)
         faceit_elo = faceit_json.get("games", {}).get("cs2", {}).get("faceit_elo", None)
         faceit_profile = FaceitProfile.create(
             player=player,
@@ -53,7 +71,9 @@ async def get_user_faceit(steam_id: int):
         current_time = datetime.now(timezone.utc)
         if faceit_profile.last_updated_at < current_time - timedelta(hours=5):
             logger.info(f"Updating faceit outdated profile for {steam_id}")
-            faceit_json = get_faceit_profile(steam_id)
+            faceit_json = get_faceit_profile_cached(steam_id)
+            # Clear cache entry after updating to ensure fresh data next time
+            clear_faceit_cache(steam_id)
             FaceitProfile.update(faceit_json=faceit_json).where(
                 FaceitProfile.player == player
             ).execute()
@@ -181,6 +201,7 @@ async def get_users_faceit_elo_and_url(request: RankRequest):
 
     for steam_id in steam_ids:
         try:
+            # Use the cached version to get faceit data
             faceit_data = await get_user_faceit(steam_id)
             url = faceit_data.get("faceit_url", "")
             if url:
@@ -196,3 +217,13 @@ async def get_users_faceit_elo_and_url(request: RankRequest):
             results[steam_id] = None
 
     return results
+
+
+# Add an endpoint to manually clear the cache if needed
+@app.post("/clear_faceit_cache")
+async def api_clear_faceit_cache(steam_id: int = None):
+    clear_faceit_cache(steam_id)
+    return {
+        "status": "success",
+        "message": f"Cache cleared for {'all users' if steam_id is None else f'steam_id {steam_id}'}",
+    }
