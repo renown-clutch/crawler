@@ -52,10 +52,6 @@ class Player(BaseModel):
 
     class Meta:
         table_name = "player"
-        indexes = (
-            (("steam_id",), True),  # True for unique index
-            (("elo",), False),  # False for non-unique index
-        )
 
 
 class Match(BaseModel):
@@ -85,11 +81,6 @@ class Match(BaseModel):
 
     class Meta:
         table_name = "match"
-        indexes = (
-            (("finished",), False),
-            (("season",), False),
-            (("status",), False),
-        )
 
 
 class Stat(BaseModel):
@@ -119,10 +110,6 @@ class Stat(BaseModel):
 
     class Meta:
         table_name = "stat"
-        indexes = (
-            (("player_id", "match_id"), False),
-            (("elo_change",), False),
-        )
 
 
 class Drop(BaseModel):
@@ -141,10 +128,6 @@ class Drop(BaseModel):
 
     class Meta:
         table_name = "drop"
-        indexes = (
-            (("player_id", "match_id"), False),
-            (("skin_name",), False),
-        )
 
 
 class MatchCrawlTask(BaseModel):
@@ -181,11 +164,6 @@ class Ban(BaseModel):
 
     class Meta:
         table_name = "ban"
-        indexes = (
-            (("player_id",), False),
-            (("issued_on",), False),
-            (("player_id", "issued_on"), False),
-        )
 
 
 class FaceitProfile(BaseModel):
@@ -197,11 +175,6 @@ class FaceitProfile(BaseModel):
 
     class Meta:
         table_name = "faceit_profile"
-        indexes = (
-            (("player_id",), True),  # One-to-one relationship with Player
-            (("faceit_elo",), False),
-            (("last_updated_at",), False),
-        )
 
 
 if config("EVOLVE", default=False, cast=bool):
