@@ -10,7 +10,7 @@ from decouple import config
 from fastapi import FastAPI
 from pydantic import BaseModel
 
-from clutch.db.models import Ban, Drop, FaceitProfile, Player
+from clutch.db.models import Ban, Drop, FaceitProfile, Player, Stat
 
 logger = logging.getLogger(__name__)
 
@@ -298,3 +298,24 @@ async def api_clear_faceit_cache(steam_id: int = None, clear_batch: bool = False
         logger.info("Cleared all faceit caches")
 
     return {"status": "success", "message": "Cache cleared successfully"}
+
+
+@app.get("/get_profile_data")
+async def get_profile_data(steam_id: int):
+    logger.info(f"Getting profile data for user {steam_id}")
+    player = Player.select().where(Player.steam_id == steam_id).first()
+
+    if player is None:
+        logger.info(f"No player found with steam_id {steam_id}")
+        return {"highest_elo": None}
+
+    # Get the highest elo_before_match value for this player
+    highest_elo_stat = (
+        Stat.select()
+        .where(Stat.player == player)
+        .order_by(Stat.elo_before_match.desc())
+        .first()
+    )
+    highest_elo = highest_elo_stat.elo_before_match if highest_elo_stat else None
+
+    return {"highest_elo": highest_elo}
