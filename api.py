@@ -294,8 +294,8 @@ async def get_users_faceit_elo_and_url(request: RankRequest):
 
 
 # Add an endpoint to manually clear the cache if needed
-@app.post("/clear_faceit_cache")
-async def api_clear_faceit_cache(steam_id: int = None, clear_batch: bool = False):
+# @app.post("/clear_faceit_cache")
+# async def api_clear_faceit_cache(steam_id: int = None, clear_batch: bool = False):
     if steam_id:
         get_faceit_profile_cached.cache_clear()
         logger.info(f"Cleared faceit cache for {steam_id}")
