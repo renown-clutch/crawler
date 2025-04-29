@@ -293,23 +293,6 @@ async def get_users_faceit_elo_and_url(request: RankRequest):
     return results
 
 
-# Add an endpoint to manually clear the cache if needed
-# @app.post("/clear_faceit_cache")
-# async def api_clear_faceit_cache(steam_id: int = None, clear_batch: bool = False):
-    if steam_id:
-        get_faceit_profile_cached.cache_clear()
-        logger.info(f"Cleared faceit cache for {steam_id}")
-    elif clear_batch:
-        batch_cache.clear()
-        logger.info("Cleared entire batch cache")
-    else:
-        get_faceit_profile_cached.cache_clear()
-        batch_cache.clear()
-        logger.info("Cleared all faceit caches")
-
-    return {"status": "success", "message": "Cache cleared successfully"}
-
-
 @app.get("/get_profile_data")
 async def get_profile_data(steam_id: int):
     logger.info(f"Getting profile data for user {steam_id}")
