@@ -8,13 +8,23 @@ from functools import lru_cache
 import requests
 from decouple import config
 from fastapi import FastAPI
+from peewee import fn
 from pydantic import BaseModel
 
-from clutch.db.models import Ban, Drop, FaceitProfile, Player, Stat
+from clutch.db.models import (
+    Ban,
+    Drop,
+    FaceitProfile,
+    Match,
+    Player,
+    Stat,
+)
 
 logger = logging.getLogger(__name__)
 
 FACEIT_API_KEY = config("FACEIT_API_KEY")
+
+RENOWN_AUTH_TOKEN = config("RENOWN_AUTH_TOKEN")
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -319,3 +329,124 @@ async def get_profile_data(steam_id: int):
     highest_elo = highest_elo_stat.elo_before_match if highest_elo_stat else None
 
     return {"highest_elo": highest_elo}
+
+
+@app.get("/get_player_matchup")
+async def get_player_matchup(player1_steam_id: int, player2_steam_id: int):
+    logger.info(
+        f"Getting matchup data for players {player1_steam_id} and {player2_steam_id}"
+    )
+
+    # Get both players
+    player1 = Player.select().where(Player.steam_id == player1_steam_id).first()
+    player2 = Player.select().where(Player.steam_id == player2_steam_id).first()
+
+    if not player1 or not player2:
+        return {"error": "One or both players not found"}
+    if player1.steam_id == player2.steam_id:
+        return {"error": "Players are the same"}
+
+    # Find matches where both players participated
+    common_matches = (
+        Match.select()
+        .join(Stat, on=(Match.id == Stat.match))
+        .where(
+            ((Stat.player == player1) | (Stat.player == player2))
+            & (Match.status != "CANCELLED")
+        )
+        .group_by(Match.id)
+        .having(fn.COUNT(Stat.id) == 2)
+    )
+
+    # Initialize counters
+    matches_played_together = 0
+    wins_together = 0
+    matches_played_against = 0
+    wins_against = 0
+    matches_list = []
+
+    # Process each match
+    for match in common_matches:
+        # Get stats for both players in this match
+        player1_stat = (
+            Stat.select()
+            .where((Stat.match == match) & (Stat.player == player1))
+            .first()
+        )
+        player2_stat = (
+            Stat.select()
+            .where((Stat.match == match) & (Stat.player == player2))
+            .first()
+        )
+
+        if not player1_stat or not player2_stat:
+            continue
+
+        # Check if they were on the same team
+        same_team = player1_stat.team == player2_stat.team
+
+        # Determine if they won
+        won_match = False
+        if match.winner == "team1" and player1_stat.team == "team1":
+            won_match = True
+        elif match.winner == "team2" and player1_stat.team == "team2":
+            won_match = True
+
+        # Update counters
+        if same_team:
+            matches_played_together += 1
+            if won_match:
+                wins_together += 1
+        else:
+            matches_played_against += 1
+            if won_match:
+                wins_against += 1
+
+        # Add match to list
+        matches_list.append(
+            {
+                "match_id": match.id,
+                "map": match.map,
+                "date": match.created_at.isoformat(),
+                "team1_score": match.team1_score,
+                "team2_score": match.team2_score,
+                "player1_team": player1_stat.team,
+                "player2_team": player2_stat.team,
+                "player1_stats": {
+                    "kills": player1_stat.kills,
+                    "deaths": player1_stat.deaths,
+                    "assists": player1_stat.assists,
+                    "mvps": player1_stat.mvps,
+                    "leetify_rating": player1_stat.leetify_rating,
+                },
+                "player2_stats": {
+                    "kills": player2_stat.kills,
+                    "deaths": player2_stat.deaths,
+                    "assists": player2_stat.assists,
+                    "mvps": player2_stat.mvps,
+                    "leetify_rating": player2_stat.leetify_rating,
+                },
+            }
+        )
+
+    # Calculate win rates
+    winrate_together = (
+        (wins_together / matches_played_together * 100)
+        if matches_played_together > 0
+        else 0
+    )
+    winrate_against = (
+        (wins_against / matches_played_against * 100)
+        if matches_played_against > 0
+        else 0
+    )
+
+    return {
+        "matches_played_together": matches_played_together,
+        "wins_together": wins_together,
+        "winrate_together": round(winrate_together, 2),
+        "matches_played_against": matches_played_against,
+        "wins_against": wins_against,
+        "winrate_against": round(winrate_against, 2),
+        "matches": matches_list,
+    }
