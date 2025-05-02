@@ -51,16 +51,15 @@ def extract_match_data(html_content: str) -> Optional[dict]:
             if not raw_array_str:
                 break
 
-            raw_array_str = raw_array_str[:-5]
-
             start_idx = raw_array_str.find('{\\"matchPageData\\"')
             if start_idx != -1:
                 raw_array_str = raw_array_str[start_idx:]
 
             raw_array_str = raw_array_str.replace('\\"', '"')
-
+            if not raw_array_str.endswith("}"):
+                last_bracket_idx = raw_array_str.rfind("}")
+                raw_array_str = raw_array_str[: last_bracket_idx + 1]
             data = json.loads(raw_array_str)
-
             return data["matchPageData"]
 
     return None
