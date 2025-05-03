@@ -302,14 +302,20 @@ async def get_profile_data(steam_id: int):
         logger.info(f"No player found with steam_id {steam_id}")
         return {"highest_elo": None}
 
-    # Get the highest elo_before_match value for this player
-    highest_elo_stat = (
-        Stat.select()
-        .where(Stat.player == player)
-        .order_by(Stat.elo_before_match.desc())
-        .first()
-    )
-    highest_elo = highest_elo_stat.elo_before_match if highest_elo_stat else None
+    # Get all stats for this player
+    player_stats = Stat.select().where(Stat.player == player)
+
+    highest_elo = None
+
+    for stat in player_stats:
+        before_elo = stat.elo_before_match
+
+        after_elo = stat.elo_before_match + stat.elo_change
+
+        if highest_elo is None:
+            highest_elo = max(before_elo, after_elo)
+        else:
+            highest_elo = max(highest_elo, before_elo, after_elo)
 
     return {"highest_elo": highest_elo}
 
