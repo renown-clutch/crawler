@@ -439,3 +439,75 @@ async def get_player_matchup(player1_steam_id: int, player2_steam_id: int):
         "winrate_against": round(winrate_against, 2),
         "matches": matches_list,
     }
+
+
+class TeamMapStatsRequest(BaseModel):
+    team1_steam_ids: list[int]
+    team2_steam_ids: list[int]
+
+
+@app.post("/get_teams_map_stats")
+async def get_teams_map_stats(request: TeamMapStatsRequest):
+    logger.info(
+        f"Getting map stats for teams: {request.team1_steam_ids} and {request.team2_steam_ids}"
+    )
+
+    # Initialize results
+    map_stats = {}
+
+    # Process each team
+    team1_stats = await get_team_map_stats(request.team1_steam_ids)
+    team2_stats = await get_team_map_stats(request.team2_steam_ids)
+
+    # Combine results
+    all_maps = set(team1_stats.keys()) | set(team2_stats.keys())
+
+    for map_name in all_maps:
+        map_stats[map_name] = {
+            "team1": team1_stats.get(map_name, 0),
+            "team2": team2_stats.get(map_name, 0),
+        }
+
+    return map_stats
+
+
+async def get_team_map_stats(steam_ids: list[int]):
+    """Get map stats for a team of players based on their last 30 matches."""
+    map_counts = {}
+
+    async def process_player(steam_id: int):
+        player = Player.select().where(Player.steam_id == steam_id).first()
+        if player is None:
+            logger.info(f"No player found with steam_id {steam_id}")
+            return {}
+
+        # Get the last 30 matches for this player
+        player_matches = (
+            Match.select(Match.map)
+            .join(Stat, on=(Match.id == Stat.match))
+            .where((Stat.player == player) & (Match.status != "CANCELLED"))
+            .order_by(Match.created_at.desc())
+            .limit(30)
+        )
+
+        # Count maps
+        player_map_counts = {}
+        for match in player_matches:
+            if match.map not in player_map_counts:
+                player_map_counts[match.map] = 0
+            player_map_counts[match.map] += 1
+
+        return player_map_counts
+
+    # Process all players concurrently
+    tasks = [process_player(steam_id) for steam_id in steam_ids]
+    players_map_counts = await asyncio.gather(*tasks)
+
+    # Combine all player map counts
+    for player_counts in players_map_counts:
+        for map_name, count in player_counts.items():
+            if map_name not in map_counts:
+                map_counts[map_name] = 0
+            map_counts[map_name] += count
+
+    return map_counts
