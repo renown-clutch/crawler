@@ -553,6 +553,7 @@ async def get_players_stats(request: PlayerStatsRequest):
         total_damage = 0
         total_headshots = 0
         total_rounds = 0
+        total_leetify_rating = 0
         wins = 0
 
         for match in player_matches:
@@ -568,6 +569,7 @@ async def get_players_stats(request: PlayerStatsRequest):
             total_deaths += stat.deaths
             total_damage += stat.damage_dealt
             total_headshots += stat.kills_with_headshot
+            total_leetify_rating += stat.leetify_rating
             # Add total rounds from match scores
             total_rounds += match.team1_score + match.team2_score
 
@@ -575,6 +577,7 @@ async def get_players_stats(request: PlayerStatsRequest):
         avg_kills = round(total_kills / total_matches)
         avg_deaths = round(total_deaths / total_matches)
         winrate = round((wins / total_matches) * 100)
+        avg_leetify_rating = round(total_leetify_rating / total_matches, 1)
 
         # Calculate K/D and K/R
         avg_kd = (
@@ -603,6 +606,7 @@ async def get_players_stats(request: PlayerStatsRequest):
             "avg_kr": avg_kr,
             "avg_adr": avg_adr,
             "avg_hs_percent": avg_hs_percent,
+            "avg_leetify_rating": avg_leetify_rating,
         }
 
     # Process all players concurrently
