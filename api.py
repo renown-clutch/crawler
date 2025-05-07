@@ -511,3 +511,93 @@ async def get_team_map_stats(steam_ids: list[int]):
             map_counts[map_name] += count
 
     return map_counts
+
+
+class PlayerStatsRequest(BaseModel):
+    steam_ids: list[int]
+
+
+@app.post("/get_players_stats")
+async def get_players_stats(request: PlayerStatsRequest):
+    logger.info(f"Getting stats for players: {request.steam_ids}")
+    results = {}
+
+    async def process_player(steam_id: int):
+        player = Player.select().where(Player.steam_id == steam_id).first()
+        if player is None:
+            return steam_id, None
+
+        # Get last 30 matches for this player
+        player_matches = (
+            Match.select(Match, Stat)
+            .join(Stat, on=(Match.id == Stat.match))
+            .where((Stat.player == player) & (Match.status != "CANCELLED"))
+            .order_by(Match.created_at.desc())
+            .limit(30)
+        )
+
+        total_matches = player_matches.count()
+        if total_matches == 0:
+            return steam_id, {
+                "total_matches": 0,
+                "winrate": 0,
+                "avg_kills": 0,
+                "avg_kd": 0,
+                "avg_kr": 0,
+                "avg_adr": 0,
+                "avg_hs_percent": 0,
+            }
+
+        total_kills = 0
+        total_deaths = 0
+        total_damage = 0
+        total_headshots = 0
+        wins = 0
+
+        for match in player_matches:
+            stat = Stat.get(Stat.match == match, Stat.player == player)
+
+            # Calculate win
+            if (match.winner == "team1" and stat.team == "team1") or (
+                match.winner == "team2" and stat.team == "team2"
+            ):
+                wins += 1
+
+            total_kills += stat.kills
+            total_deaths += stat.deaths
+            total_damage += stat.damage_dealt
+            total_headshots += stat.kills_with_headshot
+
+        # Calculate averages
+        avg_kills = total_kills / total_matches
+        avg_deaths = total_deaths / total_matches
+        avg_damage = total_damage / total_matches
+        winrate = (wins / total_matches) * 100
+
+        # Calculate K/D and K/R
+        avg_kd = avg_kills / avg_deaths if avg_deaths > 0 else avg_kills
+        avg_kr = (
+            avg_kills / (avg_kills + avg_deaths) if (avg_kills + avg_deaths) > 0 else 0
+        )
+
+        # Calculate HS%
+        avg_hs_percent = (total_headshots / total_kills * 100) if total_kills > 0 else 0
+
+        return steam_id, {
+            "total_matches": total_matches,
+            "winrate": round(winrate, 2),
+            "avg_kills": round(avg_kills, 2),
+            "avg_kd": round(avg_kd, 2),
+            "avg_kr": round(avg_kr, 2),
+            "avg_adr": round(avg_damage / total_matches, 2),
+            "avg_hs_percent": round(avg_hs_percent, 2),
+        }
+
+    # Process all players concurrently
+    tasks = [process_player(steam_id) for steam_id in request.steam_ids]
+    results_list = await asyncio.gather(*tasks)
+
+    # Convert results to dictionary
+    results = {steam_id: data for steam_id, data in results_list}
+
+    return results
