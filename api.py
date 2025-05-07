@@ -578,7 +578,7 @@ async def get_players_stats(request: PlayerStatsRequest):
 
         # Calculate K/D and K/R
         avg_kd = (
-            round(avg_kills / avg_deaths, 3) if avg_deaths > 0 else round(avg_kills, 3)
+            round(avg_kills / avg_deaths, 1) if avg_deaths > 0 else round(avg_kills, 1)
         )
         avg_kr = (
             round(avg_kills / (avg_kills + avg_deaths))
