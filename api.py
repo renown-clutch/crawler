@@ -569,7 +569,9 @@ async def get_players_stats(request: PlayerStatsRequest):
             total_deaths += stat.deaths
             total_damage += stat.damage_dealt
             total_headshots += stat.kills_with_headshot
-            total_leetify_rating += stat.leetify_rating
+            total_leetify_rating += (
+                stat.leetify_rating * 100
+            )  # Multiply by 100 to get actual rating
             # Add total rounds from match scores
             total_rounds += match.team1_score + match.team2_score
 
