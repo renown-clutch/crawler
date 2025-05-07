@@ -552,6 +552,7 @@ async def get_players_stats(request: PlayerStatsRequest):
         total_deaths = 0
         total_damage = 0
         total_headshots = 0
+        total_rounds = 0
         wins = 0
 
         for match in player_matches:
@@ -567,11 +568,12 @@ async def get_players_stats(request: PlayerStatsRequest):
             total_deaths += stat.deaths
             total_damage += stat.damage_dealt
             total_headshots += stat.kills_with_headshot
+            # Add total rounds from match scores
+            total_rounds += match.team1_score + match.team2_score
 
         # Calculate averages
         avg_kills = total_kills / total_matches
         avg_deaths = total_deaths / total_matches
-        avg_damage = total_damage / total_matches
         winrate = (wins / total_matches) * 100
 
         # Calculate K/D and K/R
@@ -583,13 +585,16 @@ async def get_players_stats(request: PlayerStatsRequest):
         # Calculate HS%
         avg_hs_percent = (total_headshots / total_kills * 100) if total_kills > 0 else 0
 
+        # Calculate ADR (Average Damage per Round)
+        avg_adr = total_damage / total_rounds if total_rounds > 0 else 0
+
         return steam_id, {
             "total_matches": total_matches,
             "winrate": round(winrate, 2),
             "avg_kills": round(avg_kills, 2),
             "avg_kd": round(avg_kd, 2),
             "avg_kr": round(avg_kr, 2),
-            "avg_adr": round(avg_damage / total_matches, 2),
+            "avg_adr": round(avg_adr, 2),
             "avg_hs_percent": round(avg_hs_percent, 2),
         }
 
