@@ -572,30 +572,37 @@ async def get_players_stats(request: PlayerStatsRequest):
             total_rounds += match.team1_score + match.team2_score
 
         # Calculate averages
-        avg_kills = total_kills / total_matches
-        avg_deaths = total_deaths / total_matches
-        winrate = (wins / total_matches) * 100
+        avg_kills = round(total_kills / total_matches, 2)
+        avg_deaths = round(total_deaths / total_matches, 2)
+        winrate = round((wins / total_matches) * 100, 2)
 
         # Calculate K/D and K/R
-        avg_kd = avg_kills / avg_deaths if avg_deaths > 0 else avg_kills
+        avg_kd = (
+            round(avg_kills / avg_deaths, 3) if avg_deaths > 0 else round(avg_kills, 3)
+        )
         avg_kr = (
-            avg_kills / (avg_kills + avg_deaths) if (avg_kills + avg_deaths) > 0 else 0
+            round(avg_kills / (avg_kills + avg_deaths), 2)
+            if (avg_kills + avg_deaths) > 0
+            else 0
         )
 
         # Calculate HS%
-        avg_hs_percent = (total_headshots / total_kills * 100) if total_kills > 0 else 0
+        avg_hs_percent = (
+            round((total_headshots / total_kills * 100), 2) if total_kills > 0 else 0
+        )
 
         # Calculate ADR (Average Damage per Round)
-        avg_adr = total_damage / total_rounds if total_rounds > 0 else 0
+        avg_adr = round(total_damage / total_rounds, 2) if total_rounds > 0 else 0
 
         return steam_id, {
             "total_matches": total_matches,
-            "winrate": round(winrate, 2),
-            "avg_kills": round(avg_kills, 2),
-            "avg_kd": round(avg_kd, 2),
-            "avg_kr": round(avg_kr, 2),
-            "avg_adr": round(avg_adr, 2),
-            "avg_hs_percent": round(avg_hs_percent, 2),
+            "winrate": winrate,
+            "avg_kills": avg_kills,
+            "avg_deaths": avg_deaths,
+            "avg_kd": avg_kd,
+            "avg_kr": avg_kr,
+            "avg_adr": avg_adr,
+            "avg_hs_percent": avg_hs_percent,
         }
 
     # Process all players concurrently
