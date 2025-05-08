@@ -483,16 +483,17 @@ async def get_team_map_stats(steam_ids: list[int]):
 
         # Get the last 30 matches for this player
         player_matches = (
-            Match.select(Match.map)
+            Match.select(Match)
             .join(Stat, on=(Match.id == Stat.match))
             .where((Stat.player == player) & (Match.status != "CANCELLED"))
-            .order_by(Match.created_at.desc())
+            .order_by(Match.id.asc())
+            .distinct()
             .limit(30)
         )
 
         # Count maps
         player_map_counts = {}
-        for match in player_matches:
+        for match in reversed(list(player_matches)):
             if match.map not in player_map_counts:
                 player_map_counts[match.map] = 0
             player_map_counts[match.map] += 1
@@ -524,15 +525,16 @@ async def get_players_stats(request: PlayerStatsRequest):
 
     async def process_player(steam_id: int):
         player = Player.select().where(Player.steam_id == steam_id).first()
-        print(f"Player: {player.id}")
+
         if player is None:
             return steam_id, None
 
         player_matches = (
-            Match.select(Match, Stat)
+            Match.select(Match)
             .join(Stat, on=(Match.id == Stat.match))
             .where((Stat.player == player) & (Match.status != "CANCELLED"))
-            .order_by(Match.id.asc())
+            .order_by(Match.id.desc())
+            .distinct()
             .limit(30)
         )
 
@@ -557,14 +559,16 @@ async def get_players_stats(request: PlayerStatsRequest):
         total_leetify_rating = 0
         wins = 0
 
+        match_count = 0
         current_streak = 0
-        for match in player_matches:
+        for match in reversed(list(player_matches)):
+            match_count += 1
+
             stat = Stat.get(Stat.match == match, Stat.player == player)
 
             won_match = (match.winner == "team1" and stat.team == "team1") or (
                 match.winner == "team2" and stat.team == "team2"
             )
-            print(f"Match {match.id} - Player {player.name} - Won: {won_match}")
 
             if current_streak == 0:
                 current_streak = 1 if won_match else -1
