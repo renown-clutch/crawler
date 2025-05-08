@@ -532,7 +532,7 @@ async def get_players_stats(request: PlayerStatsRequest):
             Match.select(Match, Stat)
             .join(Stat, on=(Match.id == Stat.match))
             .where((Stat.player == player) & (Match.status != "CANCELLED"))
-            .order_by(Match.id.desc())
+            .order_by(Match.id.asc())
             .limit(30)
         )
 
