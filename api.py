@@ -532,7 +532,7 @@ async def get_players_stats(request: PlayerStatsRequest):
             Match.select(Match, Stat)
             .join(Stat, on=(Match.id == Stat.match))
             .where((Stat.player == player) & (Match.status != "CANCELLED"))
-            .order_by(Match.created_at.desc())
+            .order_by(Match.id.desc())
             .limit(30)
         )
 
@@ -546,6 +546,7 @@ async def get_players_stats(request: PlayerStatsRequest):
                 "avg_kr": 0,
                 "avg_adr": 0,
                 "avg_hs_percent": 0,
+                "current_streak": 0,
             }
 
         total_kills = 0
@@ -556,13 +557,35 @@ async def get_players_stats(request: PlayerStatsRequest):
         total_leetify_rating = 0
         wins = 0
 
+        # Calculate current streak
+        current_streak = 0
         for match in player_matches:
             stat = Stat.get(Stat.match == match, Stat.player == player)
 
-            # Calculate win
-            if (match.winner == "team1" and stat.team == "team1") or (
+            # Determine if player won this match
+            won_match = (match.winner == "team1" and stat.team == "team1") or (
                 match.winner == "team2" and stat.team == "team2"
-            ):
+            )
+
+            # For the first match (most recent), set initial streak
+            if current_streak == 0:
+                current_streak = 1 if won_match else -1
+            else:
+                # If current streak is positive (winning streak)
+                if current_streak > 0:
+                    if won_match:
+                        current_streak += 1
+                    else:
+                        break
+                # If current streak is negative (losing streak)
+                else:
+                    if not won_match:
+                        current_streak -= 1
+                    else:
+                        break
+
+            # Calculate other stats
+            if won_match:
                 wins += 1
 
             total_kills += stat.kills
@@ -609,6 +632,7 @@ async def get_players_stats(request: PlayerStatsRequest):
             "avg_adr": avg_adr,
             "avg_hs_percent": avg_hs_percent,
             "avg_leetify_rating": avg_leetify_rating,
+            "current_streak": current_streak,
         }
 
     # Process all players concurrently
