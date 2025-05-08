@@ -524,10 +524,10 @@ async def get_players_stats(request: PlayerStatsRequest):
 
     async def process_player(steam_id: int):
         player = Player.select().where(Player.steam_id == steam_id).first()
+        print(f"Player: {player.id}")
         if player is None:
             return steam_id, None
 
-        # Get last 30 matches for this player
         player_matches = (
             Match.select(Match, Stat)
             .join(Stat, on=(Match.id == Stat.match))
@@ -557,34 +557,29 @@ async def get_players_stats(request: PlayerStatsRequest):
         total_leetify_rating = 0
         wins = 0
 
-        # Calculate current streak
         current_streak = 0
         for match in player_matches:
             stat = Stat.get(Stat.match == match, Stat.player == player)
 
-            # Determine if player won this match
             won_match = (match.winner == "team1" and stat.team == "team1") or (
                 match.winner == "team2" and stat.team == "team2"
             )
+            print(f"Match {match.id} - Player {player.name} - Won: {won_match}")
 
-            # For the first match (most recent), set initial streak
             if current_streak == 0:
                 current_streak = 1 if won_match else -1
             else:
-                # If current streak is positive (winning streak)
                 if current_streak > 0:
                     if won_match:
                         current_streak += 1
                     else:
-                        break
-                # If current streak is negative (losing streak)
+                        current_streak = 0
                 else:
                     if not won_match:
                         current_streak -= 1
                     else:
-                        break
+                        current_streak = 0
 
-            # Calculate other stats
             if won_match:
                 wins += 1
 
@@ -592,19 +587,15 @@ async def get_players_stats(request: PlayerStatsRequest):
             total_deaths += stat.deaths
             total_damage += stat.damage_dealt
             total_headshots += stat.kills_with_headshot
-            total_leetify_rating += (
-                stat.leetify_rating * 100
-            )  # Multiply by 100 to get actual rating
-            # Add total rounds from match scores
+            total_leetify_rating += stat.leetify_rating * 100
             total_rounds += match.team1_score + match.team2_score
 
-        # Calculate averages
         avg_kills = round(total_kills / total_matches)
         avg_deaths = round(total_deaths / total_matches)
         winrate = round((wins / total_matches) * 100)
+
         avg_leetify_rating = round(total_leetify_rating / total_matches, 1)
 
-        # Calculate K/D and K/R
         avg_kd = (
             round(avg_kills / avg_deaths, 1) if avg_deaths > 0 else round(avg_kills, 1)
         )
@@ -614,12 +605,10 @@ async def get_players_stats(request: PlayerStatsRequest):
             else 0
         )
 
-        # Calculate HS%
         avg_hs_percent = (
             round((total_headshots / total_kills * 100)) if total_kills > 0 else 0
         )
 
-        # Calculate ADR (Average Damage per Round)
         avg_adr = round(total_damage / total_rounds) if total_rounds > 0 else 0
 
         return steam_id, {
@@ -635,11 +624,9 @@ async def get_players_stats(request: PlayerStatsRequest):
             "current_streak": current_streak,
         }
 
-    # Process all players concurrently
     tasks = [process_player(steam_id) for steam_id in request.steam_ids]
     results_list = await asyncio.gather(*tasks)
 
-    # Convert results to dictionary
     results = {steam_id: data for steam_id, data in results_list}
 
     return results
