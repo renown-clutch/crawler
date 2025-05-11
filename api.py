@@ -11,6 +11,7 @@ from fastapi import FastAPI
 from peewee import fn
 from pydantic import BaseModel
 
+from clutch.cache import cache_manager
 from clutch.db.models import (
     Ban,
     Drop,
@@ -72,6 +73,7 @@ app = FastAPI()
 
 
 @app.get("/get_user_faceit")
+@cache_manager.cached(ttl_seconds=300)  # Cache for 5 minutes
 async def get_user_faceit(steam_id: int):
     player = Player.select().where(Player.steam_id == steam_id).first()
     if player is None:
@@ -107,12 +109,14 @@ async def get_user_faceit(steam_id: int):
 
 
 @app.get("/get_user_faceit_elo")
+@cache_manager.cached(ttl_seconds=300)  # Cache for 5 minutes
 async def get_user_faceit_elo(steam_id: int):
     faceit_data = await get_user_faceit(steam_id)
     return faceit_data.get("games", {}).get("cs2", {}).get("faceit_elo", None)
 
 
 @app.get("/get_user_faceit_url")
+@cache_manager.cached(ttl_seconds=300)  # Cache for 5 minutes
 async def get_user_faceit_url(steam_id: int):
     faceit_data = await get_user_faceit(steam_id)
     url = faceit_data.get("faceit_url", "")
@@ -122,6 +126,7 @@ async def get_user_faceit_url(steam_id: int):
 
 
 @app.get("/get_user_faceit_elo_and_url")
+@cache_manager.cached(ttl_seconds=300)  # Cache for 5 minutes
 async def get_user_faceit_elo_and_url(steam_id: int):
     faceit_data = await get_user_faceit(steam_id)
     url = faceit_data.get("faceit_url", "")
@@ -134,6 +139,7 @@ async def get_user_faceit_elo_and_url(steam_id: int):
 
 
 @app.get("/get_user_bans")
+@cache_manager.cached(ttl_seconds=600)  # Cache for 10 minutes
 async def get_user_bans(steam_id: int):
     logger.info(f"Getting bans for user {steam_id}")
     player = Player.select().where(Player.steam_id == steam_id).first()
@@ -166,6 +172,7 @@ async def get_user_bans(steam_id: int):
 
 
 @app.get("/get_user_drops")
+@cache_manager.cached(ttl_seconds=600)  # Cache for 10 minutes
 async def get_user_drops(steam_id: int):
     logger.info(f"Getting drops for user {steam_id}")
     player = Player.select().where(Player.steam_id == steam_id).first()
@@ -201,6 +208,7 @@ class RankRequest(BaseModel):
 
 
 @app.post("/get_users_ranks")
+@cache_manager.cached(ttl_seconds=300)  # Cache for 5 minutes
 async def get_users_ranks(request: RankRequest):
     steam_ids = request.steam_ids
     logger.info(f"Getting ranks for users: {steam_ids}")
@@ -220,6 +228,7 @@ async def get_users_ranks(request: RankRequest):
 
 
 @app.post("/get_users_faceit_elo_and_url")
+@cache_manager.cached(ttl_seconds=300)  # Cache for 5 minutes
 async def get_users_faceit_elo_and_url(request: RankRequest):
     steam_ids = request.steam_ids
     logger.info(f"Getting faceit elo and url for users: {steam_ids}")
@@ -294,6 +303,7 @@ async def get_users_faceit_elo_and_url(request: RankRequest):
 
 
 @app.get("/get_profile_data")
+@cache_manager.cached(ttl_seconds=600)  # Cache for 10 minutes
 async def get_profile_data(steam_id: int):
     logger.info(f"Getting profile data for user {steam_id}")
     player = Player.select().where(Player.steam_id == steam_id).first()
@@ -321,6 +331,7 @@ async def get_profile_data(steam_id: int):
 
 
 @app.get("/get_player_matchup")
+@cache_manager.cached(ttl_seconds=300)  # Cache for 5 minutes
 async def get_player_matchup(player1_steam_id: int, player2_steam_id: int):
     logger.info(
         f"Getting matchup data for players {player1_steam_id} and {player2_steam_id}"
@@ -447,6 +458,7 @@ class TeamMapStatsRequest(BaseModel):
 
 
 @app.post("/get_teams_map_stats")
+@cache_manager.cached(ttl_seconds=300)  # Cache for 5 minutes
 async def get_teams_map_stats(request: TeamMapStatsRequest):
     logger.info(
         f"Getting map stats for teams: {request.team1_steam_ids} and {request.team2_steam_ids}"
@@ -519,6 +531,7 @@ class PlayerStatsRequest(BaseModel):
 
 
 @app.post("/get_players_stats")
+@cache_manager.cached(ttl_seconds=600)  # Cache for 5 minutes
 async def get_players_stats(request: PlayerStatsRequest):
     logger.info(f"Getting stats for players: {request.steam_ids}")
     results = {}
