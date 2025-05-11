@@ -542,6 +542,16 @@ async def get_players_stats(request: PlayerStatsRequest):
         if player is None:
             return steam_id, None
 
+        # Get total count of non-cancelled games
+        total_games = (
+            Match.select(Match)
+            .join(Stat, on=(Match.id == Stat.match))
+            .where((Stat.player == player) & (Match.status != "CANCELLED"))
+            .distinct()
+            .count()
+        )
+
+        # Get last 30 matches for calculating averages
         player_matches = (
             Match.select(Match)
             .join(Stat, on=(Match.id == Stat.match))
@@ -551,8 +561,7 @@ async def get_players_stats(request: PlayerStatsRequest):
             .limit(30)
         )
 
-        total_matches = player_matches.count()
-        if total_matches == 0:
+        if total_games == 0:
             return steam_id, {
                 "total_matches": 0,
                 "winrate": 0,
@@ -607,11 +616,11 @@ async def get_players_stats(request: PlayerStatsRequest):
             total_leetify_rating += stat.leetify_rating * 100
             total_rounds += match.team1_score + match.team2_score
 
-        avg_kills = round(total_kills / total_matches)
-        avg_deaths = round(total_deaths / total_matches)
-        winrate = round((wins / total_matches) * 100)
+        avg_kills = round(total_kills / match_count)
+        avg_deaths = round(total_deaths / match_count)
+        winrate = round((wins / match_count) * 100)
 
-        avg_leetify_rating = round(total_leetify_rating / total_matches, 1)
+        avg_leetify_rating = round(total_leetify_rating / match_count, 1)
 
         avg_kd = (
             round(avg_kills / avg_deaths, 1) if avg_deaths > 0 else round(avg_kills, 1)
@@ -628,18 +637,21 @@ async def get_players_stats(request: PlayerStatsRequest):
 
         avg_adr = round(total_damage / total_rounds) if total_rounds > 0 else 0
 
-        return steam_id, {
-            "total_matches": total_matches,
-            "winrate": winrate,
-            "avg_kills": avg_kills,
-            "avg_deaths": avg_deaths,
-            "avg_kd": avg_kd,
-            "avg_kr": avg_kr,
-            "avg_adr": avg_adr,
-            "avg_hs_percent": avg_hs_percent,
-            "avg_leetify_rating": avg_leetify_rating,
-            "current_streak": current_streak,
-        }
+        return (
+            steam_id,
+            {
+                "total_matches": total_games,  # Now returns total games instead of just last 30
+                "winrate": winrate,
+                "avg_kills": avg_kills,
+                "avg_deaths": avg_deaths,
+                "avg_kd": avg_kd,
+                "avg_kr": avg_kr,
+                "avg_adr": avg_adr,
+                "avg_hs_percent": avg_hs_percent,
+                "avg_leetify_rating": avg_leetify_rating,
+                "current_streak": current_streak,
+            },
+        )
 
     tasks = [process_player(steam_id) for steam_id in request.steam_ids]
     results_list = await asyncio.gather(*tasks)
