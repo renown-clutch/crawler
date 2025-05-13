@@ -659,3 +659,58 @@ async def get_players_stats(request: PlayerStatsRequest):
     results = {steam_id: data for steam_id, data in results_list}
 
     return results
+
+
+@app.get("/get_user_last_matches")
+@cache_manager.cached(ttl_seconds=300)  # Cache for 5 minutes
+async def get_user_last_matches(steam_id: int, limit: int = 3):
+    logger.info(f"Getting last {limit} matches for user {steam_id}")
+
+    # Get the player
+    player = Player.select().where(Player.steam_id == steam_id).first()
+
+    if player is None:
+        logger.info(f"No player found with steam_id {steam_id}")
+        return {"matches": []}
+
+    # Get the last matches for this player
+    matches = (
+        Match.select(Match)
+        .join(Stat, on=(Match.id == Stat.match))
+        .where((Stat.player == player) & (Match.status != "CANCELLED"))
+        .order_by(Match.created_at.desc())
+        .limit(limit)
+        .distinct()
+    )
+
+    matches_data = []
+    for match in matches:
+        # Get player's stats for this match
+        stat = Stat.get(Stat.match == match, Stat.player == player)
+
+        # Calculate if player won
+        won = (match.winner == "team1" and stat.team == "team1") or (
+            match.winner == "team2" and stat.team == "team2"
+        )
+
+        # Calculate ADR (Average Damage per Round)
+        total_rounds = match.team1_score + match.team2_score
+        adr = round(stat.damage_dealt / total_rounds) if total_rounds > 0 else 0
+
+        matches_data.append(
+            {
+                "match_id": match.id,
+                "map": match.map,
+                "played_at": match.created_at.isoformat(),
+                "score": f"{match.team1_score}-{match.team2_score}",
+                "won": won,
+                "kills": stat.kills,
+                "assists": stat.assists,
+                "deaths": stat.deaths,
+                "adr": adr,
+                "elo_before": stat.elo_before_match,
+                "elo_change": stat.elo_change,
+            }
+        )
+
+    return {"matches": matches_data}
