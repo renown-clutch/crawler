@@ -697,12 +697,21 @@ async def get_user_last_matches(steam_id: int, limit: int = 3):
         total_rounds = match.team1_score + match.team2_score
         adr = round(stat.damage_dealt / total_rounds) if total_rounds > 0 else 0
 
+        # Determine team scores based on player's team
+        if stat.team == "team1":
+            team_score = match.team1_score
+            opponent_score = match.team2_score
+        else:
+            team_score = match.team2_score
+            opponent_score = match.team1_score
+
         matches_data.append(
             {
                 "match_id": match.id,
                 "map": match.map,
                 "played_at": match.created_at.isoformat(),
-                "score": f"{match.team1_score}-{match.team2_score}",
+                "team_score": team_score,
+                "opponent_score": opponent_score,
                 "won": won,
                 "kills": stat.kills,
                 "assists": stat.assists,
