@@ -640,7 +640,7 @@ async def get_players_stats(request: PlayerStatsRequest):
         return (
             steam_id,
             {
-                "total_matches": total_games,  # Now returns total games instead of just last 30
+                "total_matches": total_games,
                 "winrate": winrate,
                 "avg_kills": avg_kills,
                 "avg_deaths": avg_deaths,
@@ -662,18 +662,16 @@ async def get_players_stats(request: PlayerStatsRequest):
 
 
 @app.get("/get_user_last_matches")
-@cache_manager.cached(ttl_seconds=300)  # Cache for 5 minutes
+@cache_manager.cached(ttl_seconds=300)
 async def get_user_last_matches(steam_id: int, limit: int = 3):
     logger.info(f"Getting last {limit} matches for user {steam_id}")
 
-    # Get the player
     player = Player.select().where(Player.steam_id == steam_id).first()
 
     if player is None:
         logger.info(f"No player found with steam_id {steam_id}")
         return {"matches": []}
 
-    # Get the last matches for this player
     matches = (
         Match.select(Match)
         .join(Stat, on=(Match.id == Stat.match))
@@ -685,19 +683,15 @@ async def get_user_last_matches(steam_id: int, limit: int = 3):
 
     matches_data = []
     for match in matches:
-        # Get player's stats for this match
         stat = Stat.get(Stat.match == match, Stat.player == player)
 
-        # Calculate if player won
         won = (match.winner == "team1" and stat.team == "team1") or (
             match.winner == "team2" and stat.team == "team2"
         )
 
-        # Calculate ADR (Average Damage per Round)
         total_rounds = match.team1_score + match.team2_score
         adr = round(stat.damage_dealt / total_rounds) if total_rounds > 0 else 0
 
-        # Determine team scores based on player's team
         if stat.team == "team1":
             team_score = match.team1_score
             opponent_score = match.team2_score
@@ -723,3 +717,19 @@ async def get_user_last_matches(steam_id: int, limit: int = 3):
         )
 
     return {"matches": matches_data}
+
+
+@app.get("/get_live_matches")
+@cache_manager.cached(ttl_seconds=30)  # Cache for 30 seconds since it's live data
+async def get_live_matches():
+    logger.info("Getting live matches from Renown")
+    url = "https://renown.gg/api/live-matches"
+    cookies = {"auth_token": RENOWN_AUTH_TOKEN}
+
+    try:
+        response = requests.get(url, cookies=cookies)
+        response.raise_for_status()  # Raise an exception for bad status codes
+        return response.json()
+    except requests.RequestException as e:
+        logger.error(f"Error fetching live matches from Renown: {str(e)}")
+        return {"error": "Failed to fetch live matches", "details": str(e)}
