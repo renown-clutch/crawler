@@ -733,3 +733,36 @@ async def get_live_matches():
     except requests.RequestException as e:
         logger.error(f"Error fetching live matches from Renown: {str(e)}")
         return {"error": "Failed to fetch live matches", "details": str(e)}
+
+
+class PlayerNamesRequest(BaseModel):
+    player_names: list[str]
+
+
+@app.post("/get_faceit_elo_by_names")
+@cache_manager.cached(ttl_seconds=300)  # Cache for 5 minutes
+async def get_faceit_elo_by_names(request: PlayerNamesRequest):
+    logger.info(f"Getting faceit elo for players by names: {request.player_names}")
+    results = {name: None for name in request.player_names}
+
+    # Find players by name
+    players = Player.select(Player.name, Player.steam_id).where(
+        Player.name.in_(request.player_names)
+    )
+
+    # Create a map of names to steam_ids
+    steam_id_map = {player.name: player.steam_id for player in players}
+
+    # Get faceit data only for players we found
+    steam_ids = list(steam_id_map.values())
+    if steam_ids:
+        # Reuse existing endpoint to fetch Faceit data
+        faceit_request = RankRequest(steam_ids=steam_ids)
+        faceit_data = await get_users_faceit_elo_and_url(faceit_request)
+
+        # Map the results back to player names
+        for name, steam_id in steam_id_map.items():
+            if steam_id in faceit_data and faceit_data[steam_id] is not None:
+                results[name] = faceit_data[steam_id]["elo"]
+
+    return results
