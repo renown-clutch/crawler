@@ -227,6 +227,14 @@ def process_match_data(match_crawl_task: MatchCrawlTask) -> Optional[Match]:
 
         player = Player.get_or_none(name=user_data["nickname"])
 
+        price_str = skin_data.get("formattedPrice", "€0")
+        price_str = price_str.replace("€", "").strip()
+        try:
+            price_float = float(price_str)
+            price_in_cents = int(price_float * 100)
+        except (ValueError, TypeError):
+            price_in_cents = 0
+
         Drop.create(
             player=player,
             match=match,
@@ -235,11 +243,11 @@ def process_match_data(match_crawl_task: MatchCrawlTask) -> Optional[Match]:
             icon_hash=skin_data["icon_hash"],
             exterior=skin_data["exterior"],
             doppler_phase=skin_data["doppler_phase"],
-            buff_price=skin_data["buff_price"],
+            buff_price=skin_data.get("buff_price", 0),
             name_color=skin_data["name_color"],
             float_value=skin_data["float_value"],
             rarity_name=skin_data["rarity_name"],
-            steam_market_price=skin_data["steam_market"],
+            steam_market_price=price_in_cents,
         )
 
     match_crawl_task.processed = True
