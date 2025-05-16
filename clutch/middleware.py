@@ -1,11 +1,15 @@
 import time
 from typing import Callable
 
+import peewee_async
 from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.types import ASGIApp
 
 from clutch.db.models import ApiRequestLog, db
+
+# Create the database manager
+database_manager = peewee_async.Manager(db)
 
 
 class RequestLoggingMiddleware(BaseHTTPMiddleware):
@@ -64,8 +68,9 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
         response_time_ms: int,
     ):
         try:
-            # Create a new log entry using peewee_async's objects.create method
-            log_entry = ApiRequestLog(
+            # Create a new log entry using peewee_async Manager
+            await database_manager.create(
+                ApiRequestLog,
                 path=path,
                 method=method,
                 client_ip=client_ip,
@@ -75,7 +80,6 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
                 response_status=response_status,
                 response_time_ms=response_time_ms,
             )
-            await db.objects.create(log_entry)
         except Exception as e:
             # Log the error but don't interrupt the request
             print(f"Error logging request: {str(e)}")
