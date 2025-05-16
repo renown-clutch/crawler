@@ -5,7 +5,7 @@ from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.types import ASGIApp
 
-from clutch.db.models import ApiRequestLog
+from clutch.db.models import ApiRequestLog, db
 
 
 class RequestLoggingMiddleware(BaseHTTPMiddleware):
@@ -64,15 +64,18 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
         response_time_ms: int,
     ):
         try:
-            await ApiRequestLog.create(
-                path=path,
-                method=method,
-                client_ip=client_ip,
-                user_agent=user_agent,
-                request_params=request_params,
-                request_body=request_body,
-                response_status=response_status,
-                response_time_ms=response_time_ms,
+            # Use the async database object to create the log entry
+            await db.execute(
+                ApiRequestLog.insert(
+                    path=path,
+                    method=method,
+                    client_ip=client_ip,
+                    user_agent=user_agent,
+                    request_params=request_params,
+                    request_body=request_body,
+                    response_status=response_status,
+                    response_time_ms=response_time_ms,
+                )
             )
         except Exception as e:
             # Log the error but don't interrupt the request
