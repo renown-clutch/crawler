@@ -64,18 +64,17 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
         response_time_ms: int,
     ):
         try:
-            # Use the async database object to create the log entry
-            await db.execute(
-                ApiRequestLog.insert(
-                    path=path,
-                    method=method,
-                    client_ip=client_ip,
-                    user_agent=user_agent,
-                    request_params=request_params,
-                    request_body=request_body,
-                    response_status=response_status,
-                    response_time_ms=response_time_ms,
-                )
+            # Create a new log entry using peewee_async's create method
+            await db.create_async(
+                ApiRequestLog,
+                path=path,
+                method=method,
+                client_ip=client_ip,
+                user_agent=user_agent,
+                request_params=request_params,
+                request_body=request_body,
+                response_status=response_status,
+                response_time_ms=response_time_ms,
             )
         except Exception as e:
             # Log the error but don't interrupt the request
