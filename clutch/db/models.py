@@ -177,6 +177,21 @@ class FaceitProfile(BaseModel):
         table_name = "faceit_profile"
 
 
+class ApiRequestLog(BaseModel):
+    path = TextField(null=False, index=True)
+    method = TextField(null=False)
+    client_ip = TextField(null=True)
+    user_agent = TextField(null=True)
+    request_params = BinaryJSONField(default=None, null=True)
+    request_body = BinaryJSONField(default=None, null=True)
+    response_status = IntegerField(null=False)
+    response_time_ms = IntegerField(null=False)
+    created_at = DateTimeTZField(default=now, index=True)
+
+    class Meta:
+        table_name = "api_request_log"
+
+
 if config("EVOLVE", default=False, cast=bool):
     peeweedbevolve.evolve(db, ignore_tables=["basemodel"], interactive=False)
 

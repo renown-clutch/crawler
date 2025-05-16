@@ -20,6 +20,7 @@ from clutch.db.models import (
     Player,
     Stat,
 )
+from clutch.middleware import RequestLoggingMiddleware
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +71,7 @@ def clear_faceit_cache(steam_id: int = None):
 
 
 app = FastAPI()
+app.add_middleware(RequestLoggingMiddleware)
 
 
 @app.get("/get_user_faceit")
