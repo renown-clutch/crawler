@@ -573,6 +573,7 @@ async def get_players_stats(request: PlayerStatsRequest):
                 "avg_adr": 0,
                 "avg_hs_percent": 0,
                 "current_streak": 0,
+                "avg_leetify_rating": 0,
             }
 
         total_kills = 0
