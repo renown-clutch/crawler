@@ -572,6 +572,18 @@ async def combined_match_crawler_job():
     logger.info("Starting combined match crawler job")
     playwright, browser, context = await setup_browser(include_cookies=True)
 
+    # Register this with the scheduler's task tracking (if available)
+    try:
+        from clutch.scheduler import _running_tasks
+
+        _running_tasks["combined_crawler"] = (
+            None,
+            lambda: cleanup_browser(playwright, browser),
+        )
+        logger.info("Registered with scheduler's task tracking system")
+    except (ImportError, AttributeError):
+        logger.info("Could not register with scheduler task tracking (standalone mode)")
+
     # Flag to signal when to stop the tracker
     tracker_stop_event = asyncio.Event()
     tracking_task = None

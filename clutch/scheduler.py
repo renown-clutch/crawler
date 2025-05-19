@@ -20,38 +20,82 @@ TELEGRAM_BOT_TOKEN = config("TELEGRAM_BOT_TOKEN")
 
 bot = Bot(token=TELEGRAM_BOT_TOKEN)
 
+# Store running tasks to ensure proper cleanup
+_running_tasks = {}
+
+
+async def cleanup_task(task_id):
+    """Cleanup a running task if it exists."""
+    if task_id in _running_tasks:
+        logger.info(f"Cleaning up task: {task_id}")
+        try:
+            task, cleanup_fn = _running_tasks[task_id]
+            if cleanup_fn:
+                await cleanup_fn()
+        except Exception as e:
+            logger.error(f"Error cleaning up task {task_id}: {str(e)}")
+        finally:
+            del _running_tasks[task_id]
+
 
 async def crawl_matches_job():
     """Crawl new matches and update the database. (Legacy - retained for compatibility)"""
+    # Clean up any existing task first
+    await cleanup_task("crawl_matches")
+
     playwright, browser, context = await setup_browser(include_cookies=False)
     try:
+        # Store the cleanup function
+        _running_tasks["crawl_matches"] = (
+            None,
+            lambda: cleanup_browser(playwright, browser),
+        )
+
         await crawl_new_matches(context)
         logger.info("Successfully crawled new matches")
     except Exception as e:
         logger.error(f"Error crawling new matches: {str(e)}")
         await send_alert(f"Error crawling new matches: {str(e)}")
     finally:
-        await cleanup_browser(playwright, browser)
+        await cleanup_task("crawl_matches")
 
 
 async def crawl_banlist_job():
     """Crawl the ban list and update the database."""
+    # Clean up any existing task first
+    await cleanup_task("crawl_banlist")
+
     playwright, browser, context = await setup_browser(include_cookies=True)
     try:
+        # Store the cleanup function
+        _running_tasks["crawl_banlist"] = (
+            None,
+            lambda: cleanup_browser(playwright, browser),
+        )
+
         await process_new_bans(context)
         logger.info("Successfully crawled ban list")
     except Exception as e:
         logger.error(f"Error crawling ban list: {str(e)}")
         await send_alert(f"Error crawling ban list: {str(e)}")
     finally:
-        await cleanup_browser(playwright, browser)
+        await cleanup_task("crawl_banlist")
 
 
 async def check_login_status_job():
     """Check if user is still logged into renown.gg and send notification if not."""
+    # Clean up any existing task first
+    await cleanup_task("check_login")
+
     logger.info("Checking login status")
     playwright, browser, context = await setup_browser()
     try:
+        # Store the cleanup function
+        _running_tasks["check_login"] = (
+            None,
+            lambda: cleanup_browser(playwright, browser),
+        )
+
         is_logged_in = await check_renown_login(playwright, browser, context)
         if not is_logged_in:
             logger.warning("Login session expired")
@@ -79,11 +123,31 @@ async def check_login_status_job():
         logger.error(f"Error checking login status: {str(e)}")
         await send_alert(f"Error checking login status: {str(e)}")
     finally:
-        try:
-            await cleanup_browser(playwright, browser)
-        except Exception as e:
-            logger.error(f"Error during browser cleanup: {str(e)}")
-            # Don't send alert for cleanup errors as they're less critical
+        await cleanup_task("check_login")
+
+
+# Wrapper for the combined match crawler to handle cleanup properly
+async def combined_match_crawler_wrapper():
+    """Wrapper for combined match crawler job to ensure proper cleanup."""
+    # Clean up any existing task first
+    await cleanup_task("combined_crawler")
+
+    # Allow only one instance to run at a time
+    if "combined_crawler" in _running_tasks:
+        logger.warning(
+            "Combined match crawler already running, skipping this execution"
+        )
+        return
+
+    try:
+        # Run the actual job
+        await combined_match_crawler_job()
+    except Exception as e:
+        logger.error(f"Error in match crawler wrapper: {str(e)}")
+        await send_alert(f"Error in match crawler: {str(e)}")
+    finally:
+        # Make sure to clean up in case the job didn't clean up properly
+        await cleanup_task("combined_crawler")
 
 
 scheduler = AsyncIOScheduler()
@@ -94,18 +158,23 @@ scheduler.add_job(
     id="check_login_status",
     name="Check Login",
     replace_existing=True,
+    misfire_grace_time=300,  # 5 minutes
+    coalesce=True,
     next_run_time=datetime.now(),
 )
 
 # Replace the old crawl_matches job with our new combined crawler
 scheduler.add_job(
-    combined_match_crawler_job,
+    combined_match_crawler_wrapper,
     trigger="interval",
     minutes=10,  # Only restart the job if it terminates
     id="combined_match_crawler",
     name="Track and crawl matches",
     replace_existing=True,
+    misfire_grace_time=300,  # 5 minutes
+    coalesce=True,
     next_run_time=datetime.now() + timedelta(seconds=10),
+    max_instances=1,  # Ensure only one instance runs at a time
 )
 
 # Remove or comment out the old job
@@ -124,6 +193,8 @@ scheduler.add_job(
     id="crawl_banlist",
     name="Crawl banlist",
     replace_existing=True,
+    misfire_grace_time=300,  # 5 minutes
+    coalesce=True,
     next_run_time=datetime.now() + timedelta(seconds=15),
 )
 
@@ -137,5 +208,10 @@ async def start_scheduler():
         while True:
             await asyncio.sleep(1)
     except (KeyboardInterrupt, SystemExit):
+        # Clean up all running tasks
+        task_ids = list(_running_tasks.keys())
+        for task_id in task_ids:
+            await cleanup_task(task_id)
+
         scheduler.shutdown()
         logger.info("Scheduler stopped")
