@@ -23,7 +23,7 @@ bot = Bot(token=TELEGRAM_BOT_TOKEN)
 
 async def crawl_matches_job():
     """Crawl new matches and update the database."""
-    playwright, browser, context = await setup_browser()
+    playwright, browser, context = await setup_browser(include_cookies=False)
     try:
         await crawl_new_matches(context)
         logger.info("Successfully crawled new matches")
@@ -36,7 +36,7 @@ async def crawl_matches_job():
 
 async def crawl_banlist_job():
     """Crawl the ban list and update the database."""
-    playwright, browser, context = await setup_browser()
+    playwright, browser, context = await setup_browser(include_cookies=True)
     try:
         await process_new_bans(context)
         logger.info("Successfully crawled ban list")
@@ -99,7 +99,7 @@ scheduler.add_job(
 
 scheduler.add_job(
     crawl_matches_job,
-    CronTrigger(minute="*/5"),
+    CronTrigger(minute="*/1"),
     id="crawl_matches",
     name="Crawl matches",
     replace_existing=True,

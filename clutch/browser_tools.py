@@ -17,7 +17,9 @@ def should_use_remote() -> bool:
     return True
 
 
-async def setup_browser() -> Tuple[async_playwright, Browser, BrowserContext]:
+async def setup_browser(
+    include_cookies: bool = True,
+) -> Tuple[async_playwright, Browser, BrowserContext]:
     """Initialize and return playwright, browser, and context instances."""
     playwright = await async_playwright().start()
 
@@ -33,16 +35,17 @@ async def setup_browser() -> Tuple[async_playwright, Browser, BrowserContext]:
         )
         context = await browser.new_context()
 
-    auth_token = {
-        "name": "auth_token",
-        "value": RENOWN_AUTH_TOKEN,
-        "domain": ".renown.gg",
-        "path": "/",
-        "httpOnly": True,
-        "secure": True,
-        "sameSite": "Lax",
-    }
-    await context.add_cookies([auth_token])
+    if include_cookies:
+        auth_token = {
+            "name": "auth_token",
+            "value": RENOWN_AUTH_TOKEN,
+            "domain": ".renown.gg",
+            "path": "/",
+            "httpOnly": True,
+            "secure": True,
+            "sameSite": "Lax",
+        }
+        await context.add_cookies([auth_token])
 
     return playwright, browser, context
 
