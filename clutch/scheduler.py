@@ -29,8 +29,23 @@ async def cleanup_task(task_id):
     if task_id in _running_tasks:
         logger.info(f"Cleaning up task: {task_id}")
         try:
-            task, cleanup_fn = _running_tasks[task_id]
+            bg_task, cleanup_fn = _running_tasks[task_id]
+
+            # First cancel any background task if it exists and is running
+            if bg_task and not bg_task.done():
+                logger.info(f"Cancelling background task for {task_id}")
+                bg_task.cancel()
+                try:
+                    # Wait for it to actually cancel
+                    await asyncio.wait_for(asyncio.shield(bg_task), timeout=5.0)
+                except (asyncio.CancelledError, asyncio.TimeoutError, Exception) as e:
+                    logger.info(
+                        f"Background task for {task_id} cancelled: {type(e).__name__}"
+                    )
+
+            # Then run the cleanup function
             if cleanup_fn:
+                logger.info(f"Running cleanup function for {task_id}")
                 await cleanup_fn()
         except Exception as e:
             logger.error(f"Error cleaning up task {task_id}: {str(e)}")

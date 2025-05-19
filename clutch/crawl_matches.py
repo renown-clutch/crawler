@@ -377,14 +377,26 @@ async def track_live_matches_with_stop(
 
     while not stop_event.is_set():
         try:
+            # Check if we should stop before making API call
+            if stop_event.is_set():
+                break
+
             live_matches = await get_live_matches(context)
             current_live_ids = {match["id"] for match in live_matches}
+
+            # Check again after the API call
+            if stop_event.is_set():
+                break
 
             # Process newly started matches
             new_matches = current_live_ids - active_match_ids
             if new_matches:
                 logger.info(f"New live matches detected: {new_matches}")
                 for match_id in new_matches:
+                    # Check for cancellation during each iteration
+                    if stop_event.is_set():
+                        break
+
                     logger.info(
                         f"Creating tracking entry for new live match {match_id}"
                     )
@@ -397,6 +409,10 @@ async def track_live_matches_with_stop(
                         match_status="PLAYING",
                     )
 
+            # Check again before processing finished matches
+            if stop_event.is_set():
+                break
+
             # Check for finished matches
             finished_matches = active_match_ids - current_live_ids
             if finished_matches:
@@ -404,6 +420,10 @@ async def track_live_matches_with_stop(
                     f"Matches no longer live (potentially finished): {finished_matches}"
                 )
                 for match_id in finished_matches:
+                    # Check for cancellation during each iteration
+                    if stop_event.is_set():
+                        break
+
                     logger.info(f"Processing potentially finished match {match_id}")
                     # Mark for immediate processing
                     page = await context.new_page()
@@ -420,6 +440,10 @@ async def track_live_matches_with_stop(
 
             # For matches still active, update scores periodically
             for match in live_matches:
+                # Check for cancellation during each iteration
+                if stop_event.is_set():
+                    break
+
                 match_id = match["id"]
                 score_info = f"Score: {match.get('team1_current_score', 0)}-{match.get('team2_current_score', 0)}"
                 # Only update DB with live data, not fully process yet
@@ -438,13 +462,16 @@ async def track_live_matches_with_stop(
 
             # Use wait_for with timeout to allow for clean shutdown
             try:
-                await asyncio.wait_for(
-                    stop_event.wait(), timeout=25
-                )  # Poll every 25 seconds
+                # Use a shorter timeout so we can check for cancellation more frequently
+                await asyncio.wait_for(stop_event.wait(), timeout=5.0)
             except asyncio.TimeoutError:
-                # This is expected - timeout means continue the loop
-                pass
+                # This is expected - timeout means continue but wait a bit more before polling again
+                if not stop_event.is_set():
+                    await asyncio.sleep(20)  # Total polling interval remains ~25s
 
+        except asyncio.CancelledError:
+            logger.info("Live tracker task cancelled during execution")
+            break
         except Exception as e:
             logger.error(f"Error in live match tracker: {str(e)}")
             # Check if we should stop
@@ -570,72 +597,97 @@ async def crawl_matches_combined(context: Optional[BrowserContext] = None) -> No
 async def combined_match_crawler_job():
     """Combined job for all match crawling activity."""
     logger.info("Starting combined match crawler job")
-    playwright, browser, context = await setup_browser(include_cookies=True)
 
-    # Register this with the scheduler's task tracking (if available)
+    # Start live tracking in a completely separate task with its own browser context
+    logger.info("Starting live match tracking in separate task")
+    live_tracker_task = asyncio.create_task(run_live_tracker())
+
+    # Run the periodic crawler in this task
     try:
-        from clutch.scheduler import _running_tasks
+        playwright, browser, context = await setup_browser(include_cookies=True)
 
-        _running_tasks["combined_crawler"] = (
-            None,
-            lambda: cleanup_browser(playwright, browser),
-        )
-        logger.info("Registered with scheduler's task tracking system")
-    except (ImportError, AttributeError):
-        logger.info("Could not register with scheduler task tracking (standalone mode)")
-
-    # Flag to signal when to stop the tracker
-    tracker_stop_event = asyncio.Event()
-    tracking_task = None
-
-    try:
-        # Run backfill at startup
-        logger.info("Running initial backfill")
-        await backfill_missed_matches(context)
-        logger.info("Initial backfill completed")
-
-        # Start live tracking with stop event
-        logger.info("Starting live match tracking task")
-        tracking_task = asyncio.create_task(
-            track_live_matches_with_stop(context, tracker_stop_event)
-        )
-        logger.info("Live match tracking task started")
-
-        # Run standard crawler every 2 minutes to catch any new matches
-        logger.info("Starting periodic crawler checks")
+        # Register this with the scheduler's task tracking (if available)
         try:
-            while True:
-                logger.info("Running periodic match crawler")
-                await crawl_matches_combined(context)
-                logger.info(
-                    "Periodic match crawler completed, sleeping for 120 seconds"
-                )
-                await asyncio.sleep(120)
-        except asyncio.CancelledError:
-            logger.info("Main crawler loop cancelled")
-            raise
-    except Exception as e:
-        logger.error(f"Error in combined match crawler: {str(e)}")
-        await send_alert(f"Error in match crawler: {str(e)}")
-    finally:
-        # Signal the tracker to stop and wait for it
-        logger.info("Signaling live tracker to stop")
-        tracker_stop_event.set()
+            from clutch.scheduler import _running_tasks
 
-        if tracking_task:
+            _running_tasks["combined_crawler"] = (
+                live_tracker_task,
+                lambda: cleanup_browser(playwright, browser),
+            )
+            logger.info("Registered with scheduler's task tracking system")
+        except (ImportError, AttributeError):
+            logger.info(
+                "Could not register with scheduler task tracking (standalone mode)"
+            )
+
+        try:
+            # Run backfill at startup
+            logger.info("Running initial backfill")
+            await backfill_missed_matches(context)
+            logger.info("Initial backfill completed")
+
+            # Run standard crawler periodically to catch any new matches
+            logger.info("Starting periodic crawler checks")
             try:
-                logger.info("Waiting for live tracker to finish")
-                # Wait with a timeout to avoid hanging
-                await asyncio.wait_for(tracking_task, timeout=5.0)
-                logger.info("Live tracker finished")
-            except asyncio.TimeoutError:
-                logger.warning("Live tracker did not finish in time, cancelling")
-                tracking_task.cancel()
-            except Exception as e:
-                logger.error(f"Error waiting for tracking task: {str(e)}")
+                while True:
+                    logger.info("Running periodic match crawler")
+                    await crawl_matches_combined(context)
+                    logger.info(
+                        "Periodic match crawler completed, sleeping for 120 seconds"
+                    )
+                    await asyncio.sleep(120)
+            except asyncio.CancelledError:
+                logger.info("Main crawler loop cancelled")
+                raise
+        finally:
+            logger.info("Cleaning up periodic crawler browser")
+            await cleanup_browser(playwright, browser)
 
-        logger.info("Cleaning up combined match crawler job")
-        await cleanup_browser(playwright, browser)
+    except Exception as e:
+        logger.error(f"Error in periodic crawler: {str(e)}")
+        await send_alert(f"Error in periodic crawler: {str(e)}")
+    finally:
+        # Cancel the live tracker task
+        if not live_tracker_task.done():
+            logger.info("Cancelling live tracker task")
+            live_tracker_task.cancel()
+            try:
+                await live_tracker_task
+            except asyncio.CancelledError:
+                logger.info("Live tracker task cancelled")
+            except Exception as e:
+                logger.error(f"Error cancelling live tracker: {str(e)}")
+
+
+async def run_live_tracker():
+    """Run the live tracker with its own isolated browser context."""
+    logger.info("Setting up dedicated browser context for live tracker")
+    # Create a separate browser context just for the live tracker
+    playwright, browser, context = None, None, None
+
+    try:
+        playwright, browser, context = await setup_browser(include_cookies=True)
+        logger.info("Live tracker browser context created")
+
+        # Create an event that is only set when this task is cancelled
+        stop_event = asyncio.Event()
+
+        # Start the actual tracking
+        await track_live_matches_with_stop(context, stop_event)
+    except asyncio.CancelledError:
+        logger.info("Live tracker received cancel signal")
+        raise
+    except Exception as e:
+        logger.error(f"Error in live tracker: {str(e)}")
+        await send_alert(f"Error in live tracker: {str(e)}")
+    finally:
+        if context:
+            logger.info("Cleaning up live tracker browser context")
+            try:
+                await cleanup_browser(playwright, browser)
+                logger.info("Live tracker browser context cleaned up")
+            except Exception as e:
+                logger.error(f"Error cleaning up live tracker browser: {str(e)}")
 
 
 async def crawl_new_matches(context: Optional[BrowserContext] = None) -> None:
