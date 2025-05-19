@@ -3,13 +3,14 @@ import json
 import logging
 import re
 from datetime import datetime
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 from zoneinfo import ZoneInfo
 
 from playwright.async_api import BrowserContext, Page
 
 from clutch.browser_tools import cleanup_browser, setup_browser
 from clutch.db.models import Drop, Match, MatchCrawlTask, Player, Stat, db
+from clutch.telegram_utils import send_alert
 
 logger = logging.getLogger(__name__)
 
@@ -351,31 +352,252 @@ async def get_last_match_id() -> int:
     return 7  # hardcoded, since first match on renown is 8
 
 
-async def crawl_new_matches(context: Optional[BrowserContext] = None) -> None:
-    """Crawl the matches and update the database."""
-    logger.info("Starting to crawl new matches")
+async def get_live_matches(context: BrowserContext) -> List[Dict]:
+    """Fetch current live matches from API."""
     page = await context.new_page()
-
-    match_id = await get_last_match_id()
-    match_status = "cancelled"
-
-    while match_status in ["finished", "cancelled"]:
-        match_id += 1
-        match_status = await crawl_single_match(match_id, page)
-    logger.info("No more matches to crawl")
-
-    await page.close()
-
-
-async def main():
-    """Main function to run the matches crawler."""
-    playwright, browser, context = await setup_browser()
     try:
-        await crawl_new_matches(context)
+        await page.goto("https://renown.gg/api/live-matches", timeout=30000)
+        content = await page.content()
+        json_content = await page.evaluate("() => JSON.parse(document.body.innerText)")
+        live_matches = json_content.get("liveMatches", [])
+        logger.info(
+            f"Found {len(live_matches)} live matches: {[match['id'] for match in live_matches]}"
+        )
+        return live_matches
     finally:
+        await page.close()
+
+
+async def track_live_matches(context: BrowserContext) -> None:
+    """Poll and track live matches with higher frequency."""
+    active_match_ids = set()
+    logger.info("Starting live match tracker")
+
+    while True:
+        try:
+            live_matches = await get_live_matches(context)
+            current_live_ids = {match["id"] for match in live_matches}
+
+            # Process newly started matches
+            new_matches = current_live_ids - active_match_ids
+            if new_matches:
+                logger.info(f"New live matches detected: {new_matches}")
+                for match_id in new_matches:
+                    logger.info(
+                        f"Creating tracking entry for new live match {match_id}"
+                    )
+                    # Create a tracking entry but don't process yet
+                    await update_or_create_match_task(
+                        match_id=match_id,
+                        page_html="",
+                        processed=False,
+                        error_occured=False,
+                        match_status="PLAYING",
+                    )
+
+            # Check for finished matches
+            finished_matches = active_match_ids - current_live_ids
+            if finished_matches:
+                logger.info(
+                    f"Matches no longer live (potentially finished): {finished_matches}"
+                )
+                for match_id in finished_matches:
+                    logger.info(f"Processing potentially finished match {match_id}")
+                    # Mark for immediate processing
+                    page = await context.new_page()
+                    try:
+                        match_status = await crawl_single_match(match_id, page)
+                        logger.info(
+                            f"Processed finished match {match_id}: status={match_status}"
+                        )
+                    finally:
+                        await page.close()
+
+            # Update active match list
+            active_match_ids = current_live_ids
+
+            # For matches still active, update scores periodically
+            for match in live_matches:
+                match_id = match["id"]
+                score_info = f"Score: {match.get('team1_current_score', 0)}-{match.get('team2_current_score', 0)}"
+                # Only update DB with live data, not fully process yet
+                task = (
+                    MatchCrawlTask.select()
+                    .where(MatchCrawlTask.match_id == match_id)
+                    .first()
+                )
+                if task:
+                    logger.info(f"Updating live match {match_id} - {score_info}")
+                    task.match_status = match["status"]
+                    task.save()
+
+            if active_match_ids:
+                logger.info(f"Currently tracking live matches: {active_match_ids}")
+            await asyncio.sleep(25)  # Poll every 25 seconds
+
+        except Exception as e:
+            logger.error(f"Error in live match tracker: {str(e)}")
+            await asyncio.sleep(60)  # Back off on error
+
+
+async def backfill_missed_matches(context: BrowserContext) -> None:
+    """Check for any potentially missed matches and process them."""
+    logger.info("Starting match backfill check")
+
+    # Get the highest match ID we've recorded
+    highest_tracked = await get_last_match_id()
+    logger.info(f"Highest tracked match ID: {highest_tracked}")
+
+    # Get the lowest unprocessed match
+    lowest_unprocessed = (
+        MatchCrawlTask.select()
+        .where(MatchCrawlTask.processed == False)
+        .order_by(MatchCrawlTask.match_id.asc())
+        .first()
+    )
+
+    lowest_id = lowest_unprocessed.match_id if lowest_unprocessed else highest_tracked
+    if lowest_unprocessed:
+        logger.info(f"Lowest unprocessed match: {lowest_id}")
+
+    # Check for any gaps in our match history
+    all_matches = set(
+        m.match_id for m in MatchCrawlTask.select(MatchCrawlTask.match_id)
+    )
+    missed_matches = set(range(8, highest_tracked + 1)) - all_matches
+
+    if missed_matches:
+        logger.info(
+            f"Found {len(missed_matches)} missed matches: {sorted(missed_matches)}"
+        )
+    else:
+        logger.info("No missed matches found in history")
+
+    page = await context.new_page()
+    try:
+        # Process all gaps we found
+        for match_id in sorted(missed_matches):
+            logger.info(f"Processing missed match {match_id}")
+            status = await crawl_single_match(match_id, page)
+            logger.info(f"Processed missed match {match_id}: status={status}")
+
+        # Now check for unprocessed matches
+        unprocessed = (
+            MatchCrawlTask.select()
+            .where(MatchCrawlTask.processed == False)
+            .order_by(MatchCrawlTask.match_id.asc())
+        )
+
+        unprocessed_count = unprocessed.count()
+        if unprocessed_count > 0:
+            logger.info(f"Found {unprocessed_count} unprocessed matches")
+            for task in unprocessed:
+                logger.info(f"Processing unfinished match {task.match_id}")
+                status = await crawl_single_match(task.match_id, page)
+                logger.info(
+                    f"Processed unfinished match {task.match_id}: status={status}"
+                )
+        else:
+            logger.info("No unprocessed matches found")
+    finally:
+        await page.close()
+
+
+async def crawl_matches_combined(context: Optional[BrowserContext] = None) -> None:
+    """Combined approach to crawl matches with backfilling and live tracking."""
+    logger.info("Starting combined match crawler")
+
+    own_context = context is None
+    if own_context:
+        logger.info("Creating new browser context")
+        playwright, browser, context = await setup_browser()
+
+    try:
+        # First, backfill any missed matches
+        logger.info("Starting backfill process")
+        await backfill_missed_matches(context)
+        logger.info("Backfill process completed")
+
+        # Then continue looking for new matches beyond our highest ID
+        highest_id = await get_last_match_id()
+        logger.info(f"Looking for new matches beyond ID {highest_id}")
+
+        page = await context.new_page()
+        try:
+            # Look ahead for some new matches
+            consecutive_not_found = 0
+            match_id = highest_id
+            while consecutive_not_found < 1:  # Allow for some gaps
+                match_id += 1
+                logger.info(f"Checking for match {match_id}")
+                match_status = await crawl_single_match(match_id, page)
+                logger.info(f"Match {match_id} check result: {match_status}")
+
+                if match_status == "404":
+                    consecutive_not_found += 1
+                    logger.info(
+                        f"Match {match_id} not found (404) - consecutive not found: {consecutive_not_found}/5"
+                    )
+                else:
+                    consecutive_not_found = 0
+                    logger.info(
+                        f"Found valid match {match_id} with status: {match_status}"
+                    )
+        finally:
+            await page.close()
+            logger.info(f"Finished looking for new matches (stopped at ID {match_id})")
+    finally:
+        if own_context:
+            logger.info("Cleaning up browser context")
+            await cleanup_browser(playwright, browser)
+
+
+async def combined_match_crawler_job():
+    """Combined job for all match crawling activity."""
+    logger.info("Starting combined match crawler job")
+    playwright, browser, context = await setup_browser(include_cookies=True)
+    try:
+        # Run backfill at startup
+        logger.info("Running initial backfill")
+        await backfill_missed_matches(context)
+        logger.info("Initial backfill completed")
+
+        # Start live tracking
+        logger.info("Starting live match tracking task")
+        tracking_task = asyncio.create_task(track_live_matches(context))
+        logger.info("Live match tracking task started")
+
+        # Run standard crawler every 2 minutes to catch any new matches
+        logger.info("Starting periodic crawler checks")
+        while True:
+            logger.info("Running periodic match crawler")
+            await crawl_matches_combined(context)
+            logger.info("Periodic match crawler completed, sleeping for 120 seconds")
+            await asyncio.sleep(120)
+    except Exception as e:
+        logger.error(f"Error in combined match crawler: {str(e)}")
+        await send_alert(f"Error in match crawler: {str(e)}")
+    finally:
+        logger.info("Cleaning up combined match crawler job")
         await cleanup_browser(playwright, browser)
+
+
+async def crawl_new_matches(context: Optional[BrowserContext] = None) -> None:
+    """Crawl the matches and update the database.
+    Legacy function - use crawl_matches_combined instead."""
+    logger.info("Starting to crawl new matches (legacy method)")
+    own_context = context is None
+    if own_context:
+        playwright, browser, context = await setup_browser()
+
+    try:
+        # Use the new combined approach instead
+        await crawl_matches_combined(context)
+    finally:
+        if own_context:
+            await cleanup_browser(playwright, browser)
 
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
-    asyncio.run(main())
+    asyncio.run(combined_match_crawler_job())

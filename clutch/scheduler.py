@@ -9,7 +9,7 @@ from telegram import Bot
 
 from .browser_tools import check_renown_login, cleanup_browser, setup_browser
 from .crawl_banlist import process_new_bans
-from .crawl_matches import crawl_new_matches
+from .crawl_matches import combined_match_crawler_job, crawl_new_matches
 from .telegram_utils import send_alert
 
 logging.basicConfig(level=logging.INFO)
@@ -22,7 +22,7 @@ bot = Bot(token=TELEGRAM_BOT_TOKEN)
 
 
 async def crawl_matches_job():
-    """Crawl new matches and update the database."""
+    """Crawl new matches and update the database. (Legacy - retained for compatibility)"""
     playwright, browser, context = await setup_browser(include_cookies=False)
     try:
         await crawl_new_matches(context)
@@ -97,15 +97,26 @@ scheduler.add_job(
     next_run_time=datetime.now(),
 )
 
+# Replace the old crawl_matches job with our new combined crawler
 scheduler.add_job(
-    crawl_matches_job,
-    CronTrigger(minute="*/1"),
-    id="crawl_matches",
-    name="Crawl matches",
+    combined_match_crawler_job,
+    trigger="interval",
+    minutes=10,  # Only restart the job if it terminates
+    id="combined_match_crawler",
+    name="Track and crawl matches",
     replace_existing=True,
     next_run_time=datetime.now() + timedelta(seconds=10),
 )
 
+# Remove or comment out the old job
+# scheduler.add_job(
+#     crawl_matches_job,
+#     CronTrigger(minute="*/1"),
+#     id="crawl_matches",
+#     name="Crawl matches",
+#     replace_existing=True,
+#     next_run_time=datetime.now() + timedelta(seconds=10),
+# )
 
 scheduler.add_job(
     crawl_banlist_job,
