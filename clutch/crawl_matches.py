@@ -291,55 +291,59 @@ async def crawl_single_match(match_id: int, page: Page):
     """Crawl a single match page."""
     logger.info(f"Crawling match {match_id}")
 
-    url = f"https://renown.gg/match/{match_id}"
-    await page.goto(url, timeout=60000)
-    await page.wait_for_load_state("networkidle", timeout=60000)
+    try:
+        url = f"https://renown.gg/match/{match_id}"
+        await page.goto(url, timeout=60000)
+        await page.wait_for_load_state("networkidle", timeout=60000)
 
-    html_content = await page.content()
+        html_content = await page.content()
 
-    not_found_selector = (
-        'div.row:has(h1:text("404")) > div.text:text("This page could not be found")'
-    )
-    not_found = await page.query_selector(not_found_selector)
-    if not_found:
-        logger.info(f"Match {match_id} does not exist (404)")
-        return "404"
+        not_found_selector = 'div.row:has(h1:text("404")) > div.text:text("This page could not be found")'
+        not_found = await page.query_selector(not_found_selector)
+        if not_found:
+            logger.info(f"Match {match_id} does not exist (404)")
+            return "404"
 
-    status_selector = "div.status div.status-wrapper"
-    status_element = await page.query_selector(status_selector)
-    match_status = "error"
+        status_selector = "div.status div.status-wrapper"
+        status_element = await page.query_selector(status_selector)
+        match_status = "error"
 
-    if status_element:
-        status_text = await status_element.text_content()
-        match_status = status_text.strip().lower()
+        if status_element:
+            status_text = await status_element.text_content()
+            match_status = status_text.strip().lower()
 
-    if match_status in ["finished", "cancelled"]:
-        match_data = extract_match_data(html_content)
+        if match_status in ["finished", "cancelled"]:
+            match_data = extract_match_data(html_content)
 
-        with db.atomic() as transaction:
-            try:
-                match_crawl_task = await update_or_create_match_task(
-                    match_id=match_id,
-                    page_html=html_content,
-                    processed=False,
-                    error_occured=False,
-                    match_status=match_status,
-                    parsed_match_json=match_data,
-                )
-                process_match_data(match_crawl_task)
-                logger.info(
-                    f"Successfully crawled and processed match {match_id} - {match_status}"
-                )
-            except Exception as e:
-                logger.error(f"Error processing match {match_id}: {str(e)}")
+            with db.atomic() as transaction:
+                try:
+                    match_crawl_task = await update_or_create_match_task(
+                        match_id=match_id,
+                        page_html=html_content,
+                        processed=False,
+                        error_occured=False,
+                        match_status=match_status,
+                        parsed_match_json=match_data,
+                    )
+                    process_match_data(match_crawl_task)
+                    logger.info(
+                        f"Successfully crawled and processed match {match_id} - {match_status}"
+                    )
+                except Exception as e:
+                    logger.error(f"Error processing match {match_id}: {str(e)}")
 
-                transaction.rollback()
-                MatchCrawlTask.delete().where(
-                    MatchCrawlTask.match_id == match_id
-                ).execute()
-                return "error"
+                    transaction.rollback()
+                    MatchCrawlTask.delete().where(
+                        MatchCrawlTask.match_id == match_id
+                    ).execute()
+                    return "error"
 
-    return match_status
+        return match_status
+    except Exception as e:
+        logger.error(f"Error crawling match {match_id}: {str(e)}")
+        if "Target page, context or browser has been closed" in str(e):
+            return "context_closed"
+        return "error"
 
 
 async def get_last_match_id() -> int:
@@ -354,18 +358,28 @@ async def get_last_match_id() -> int:
 
 async def get_live_matches(context: BrowserContext) -> List[Dict]:
     """Fetch current live matches from API."""
-    page = await context.new_page()
     try:
-        await page.goto("https://renown.gg/api/live-matches", timeout=30000)
-        content = await page.content()
-        json_content = await page.evaluate("() => JSON.parse(document.body.innerText)")
-        live_matches = json_content.get("liveMatches", [])
-        logger.info(
-            f"Found {len(live_matches)} live matches: {[match['id'] for match in live_matches]}"
-        )
-        return live_matches
-    finally:
-        await page.close()
+        page = await context.new_page()
+        try:
+            await page.goto("https://renown.gg/api/live-matches", timeout=30000)
+            content = await page.content()
+            json_content = await page.evaluate(
+                "() => JSON.parse(document.body.innerText)"
+            )
+            live_matches = json_content.get("liveMatches", [])
+            logger.info(
+                f"Found {len(live_matches)} live matches: {[match['id'] for match in live_matches]}"
+            )
+            return live_matches
+        finally:
+            await page.close()
+    except Exception as e:
+        if "Target page, context or browser has been closed" in str(e):
+            logger.warning("Browser context closed during get_live_matches")
+            # Return empty list instead of failing
+            return []
+        # Re-raise other exceptions
+        raise
 
 
 async def track_live_matches_with_stop(
@@ -375,11 +389,37 @@ async def track_live_matches_with_stop(
     active_match_ids = set()
     logger.info("Starting live match tracker with stop event")
 
+    # Track if we need to recreate the browser context
+    browser_context_valid = True
+    playwright = None
+    browser = None
+    local_context = None
+    own_context = False
+
     while not stop_event.is_set():
         try:
             # Check if we should stop before making API call
             if stop_event.is_set():
                 break
+
+            # Check if we need to recreate the browser context
+            if not browser_context_valid:
+                logger.info("Recreating browser context after previous error")
+                if own_context and local_context:
+                    try:
+                        # Clean up old context if it exists
+                        await cleanup_browser(playwright, browser)
+                    except Exception as e:
+                        logger.error(f"Error cleaning up old browser context: {str(e)}")
+
+                # Create a new browser context
+                playwright, browser, local_context = await setup_browser(
+                    include_cookies=True
+                )
+                own_context = True
+                context = local_context
+                browser_context_valid = True
+                logger.info("Successfully recreated browser context")
 
             live_matches = await get_live_matches(context)
             current_live_ids = {match["id"] for match in live_matches}
@@ -474,12 +514,30 @@ async def track_live_matches_with_stop(
             break
         except Exception as e:
             logger.error(f"Error in live match tracker: {str(e)}")
-            # Check if we should stop
-            if stop_event.is_set():
-                break
-            await asyncio.sleep(60)  # Back off on error
+
+            # Check if this is a browser context error
+            if "Target page, context or browser has been closed" in str(e):
+                logger.warning(
+                    "Browser context has been closed, marking for recreation"
+                )
+                browser_context_valid = False
+                await asyncio.sleep(5)  # Brief pause before retry
+            else:
+                # Check if we should stop
+                if stop_event.is_set():
+                    break
+                await asyncio.sleep(60)  # Back off on other errors
 
     logger.info("Live match tracker shutting down")
+
+    # Clean up our own resources if we created them
+    if own_context and local_context:
+        try:
+            logger.info("Cleaning up locally created browser context")
+            await cleanup_browser(playwright, browser)
+            logger.info("Local browser context cleaned up")
+        except Exception as e:
+            logger.error(f"Error cleaning up local browser context: {str(e)}")
 
 
 async def backfill_missed_matches(context: BrowserContext) -> None:
@@ -630,12 +688,49 @@ async def combined_match_crawler_job():
             logger.info("Starting periodic crawler checks")
             try:
                 while True:
-                    logger.info("Running periodic match crawler")
-                    await crawl_matches_combined(context)
-                    logger.info(
-                        "Periodic match crawler completed, sleeping for 120 seconds"
-                    )
-                    await asyncio.sleep(120)
+                    try:
+                        logger.info("Running periodic match crawler")
+                        await crawl_matches_combined(context)
+                        logger.info(
+                            "Periodic match crawler completed, sleeping for 120 seconds"
+                        )
+                        await asyncio.sleep(120)
+                    except Exception as e:
+                        if "Target page, context or browser has been closed" in str(e):
+                            logger.warning("Browser context was closed, recreating...")
+                            # Clean up old browser if possible
+                            try:
+                                await cleanup_browser(playwright, browser)
+                            except Exception as cleanup_error:
+                                logger.error(
+                                    f"Error cleaning up browser: {str(cleanup_error)}"
+                                )
+
+                            # Create a new browser context
+                            playwright, browser, context = await setup_browser(
+                                include_cookies=True
+                            )
+                            logger.info("Successfully recreated browser context")
+
+                            # Update the task tracking with new cleanup function
+                            try:
+                                from clutch.scheduler import _running_tasks
+
+                                if "combined_crawler" in _running_tasks:
+                                    current_task, _ = _running_tasks["combined_crawler"]
+                                    _running_tasks["combined_crawler"] = (
+                                        current_task,
+                                        lambda: cleanup_browser(playwright, browser),
+                                    )
+                            except (ImportError, AttributeError):
+                                pass
+
+                            # Continue with the next iteration
+                            await asyncio.sleep(5)
+                        else:
+                            logger.error(f"Error in periodic crawler: {str(e)}")
+                            await send_alert(f"Error in periodic crawler: {str(e)}")
+                            await asyncio.sleep(60)  # Back off on other errors
             except asyncio.CancelledError:
                 logger.info("Main crawler loop cancelled")
                 raise
@@ -664,23 +759,65 @@ async def run_live_tracker():
     logger.info("Setting up dedicated browser context for live tracker")
     # Create a separate browser context just for the live tracker
     playwright, browser, context = None, None, None
+    stop_event = asyncio.Event()
 
     try:
-        playwright, browser, context = await setup_browser(include_cookies=True)
-        logger.info("Live tracker browser context created")
+        max_retries = 3
+        retry_count = 0
 
-        # Create an event that is only set when this task is cancelled
-        stop_event = asyncio.Event()
+        while retry_count < max_retries:
+            try:
+                if context is None:
+                    logger.info("Creating new browser context for live tracker")
+                    playwright, browser, context = await setup_browser(
+                        include_cookies=True
+                    )
+                    logger.info("Live tracker browser context created")
 
-        # Start the actual tracking
-        await track_live_matches_with_stop(context, stop_event)
-    except asyncio.CancelledError:
-        logger.info("Live tracker received cancel signal")
-        raise
-    except Exception as e:
-        logger.error(f"Error in live tracker: {str(e)}")
-        await send_alert(f"Error in live tracker: {str(e)}")
+                # Start the actual tracking
+                await track_live_matches_with_stop(context, stop_event)
+                # If we get here without exceptions, we can break the retry loop
+                break
+
+            except asyncio.CancelledError:
+                # Don't retry on cancellation
+                logger.info("Live tracker received cancel signal")
+                raise
+
+            except Exception as e:
+                retry_count += 1
+                if "Target page, context or browser has been closed" in str(e):
+                    logger.warning(
+                        f"Browser context closed, retry {retry_count}/{max_retries}"
+                    )
+                    # Clean up existing context if possible
+                    if context:
+                        try:
+                            await cleanup_browser(playwright, browser)
+                            logger.info("Cleaned up closed browser context")
+                        except Exception as cleanup_error:
+                            logger.error(
+                                f"Error cleaning up browser: {str(cleanup_error)}"
+                            )
+
+                    # Reset context to trigger recreation in next loop iteration
+                    context = None
+                    # Short wait before retrying
+                    await asyncio.sleep(5)
+                else:
+                    logger.error(f"Error in live tracker: {str(e)}")
+                    await send_alert(f"Error in live tracker: {str(e)}")
+
+                    # For non-context errors, longer wait
+                    if retry_count < max_retries:
+                        await asyncio.sleep(30)
+                    else:
+                        # Stop retrying after max attempts
+                        raise
     finally:
+        # Set the stop event to ensure any running tracking stops
+        stop_event.set()
+
         if context:
             logger.info("Cleaning up live tracker browser context")
             try:
