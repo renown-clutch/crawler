@@ -723,7 +723,7 @@ async def get_user_last_matches(steam_id: int, limit: int = 3):
 
 
 @app.get("/get_live_matches")
-@cache_manager.cached(ttl_seconds=30)  # Cache for 30 seconds since it's live data
+@cache_manager.cached(ttl_seconds=10)
 async def get_live_matches():
     logger.info("Getting live matches from Renown")
     url = "https://renown.gg/api/live-matches"
