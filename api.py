@@ -12,6 +12,10 @@ from peewee import fn
 from pydantic import BaseModel
 
 from clutch.cache import cache_manager
+from clutch.cache_invalidator import (
+    run_cache_invalidation_job,
+    set_clear_faceit_cache_func,
+)
 from clutch.db.models import (
     Ban,
     Drop,
@@ -72,6 +76,19 @@ def clear_faceit_cache(steam_id: int = None):
 
 app = FastAPI()
 app.add_middleware(RequestLoggingMiddleware)
+
+
+@app.on_event("startup")
+async def startup_event():
+    """Start the cache invalidation job when the API starts."""
+    logger.info("Starting cache invalidation job...")
+
+    # Register the clear_faceit_cache function with the cache invalidator
+    set_clear_faceit_cache_func(clear_faceit_cache)
+
+    # Run the job in the background to not block API startup
+    asyncio.create_task(run_cache_invalidation_job(interval_seconds=60))
+    logger.info("Cache invalidation job started.")
 
 
 @app.get("/get_user_faceit")
@@ -769,3 +786,62 @@ async def get_faceit_elo_by_names(request: PlayerNamesRequest):
                 results[name] = faceit_data[steam_id]["elo"]
 
     return results
+
+
+class CacheInvalidationRequest(BaseModel):
+    pattern: str
+    admin_key: str
+
+
+@app.post("/admin/invalidate_cache")
+async def invalidate_cache(request: CacheInvalidationRequest):
+    """
+    Manually invalidate cache entries matching a pattern.
+    Requires admin key for security.
+    """
+    admin_key = config("ADMIN_API_KEY", default="")
+    if not admin_key or request.admin_key != admin_key:
+        return {"status": "error", "message": "Invalid admin key"}
+
+    try:
+        invalidated = cache_manager.invalidate_pattern(request.pattern)
+        return {
+            "status": "success",
+            "message": f"Cache invalidated for pattern: {request.pattern}",
+            "invalidated_keys_count": invalidated,
+        }
+    except Exception as e:
+        logger.error(f"Error invalidating cache: {str(e)}")
+        return {"status": "error", "message": str(e)}
+
+
+class CacheStatisticsRequest(BaseModel):
+    admin_key: str
+
+
+@app.post("/admin/cache_statistics")
+async def get_cache_statistics(request: CacheStatisticsRequest):
+    """
+    Get statistics about the current cache usage.
+    Requires admin key for security.
+    """
+    admin_key = config("ADMIN_API_KEY", default="")
+    if not admin_key or request.admin_key != admin_key:
+        return {"status": "error", "message": "Invalid admin key"}
+
+    try:
+        # This assumes cache_manager has a method to get statistics
+        # Implement this method in the cache manager if it doesn't exist
+        stats = (
+            cache_manager.get_statistics()
+            if hasattr(cache_manager, "get_statistics")
+            else {}
+        )
+
+        # Return the basic cache counts from our invalidator
+        from clutch.cache_invalidator import last_counts
+
+        return {"status": "success", "cache_stats": stats, "db_counts": last_counts}
+    except Exception as e:
+        logger.error(f"Error getting cache statistics: {str(e)}")
+        return {"status": "error", "message": str(e)}
