@@ -4,12 +4,14 @@ import json
 import logging
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache
+from typing import Any, Dict, List, Optional
 
 import requests
 from decouple import config
-from fastapi import FastAPI
+from fastapi import FastAPI, Query, WebSocket, WebSocketDisconnect
 from peewee import fn
 from pydantic import BaseModel
+from starlette.websockets import WebSocketState
 
 from clutch.cache import cache_manager
 from clutch.cache_invalidator import (
@@ -845,3 +847,415 @@ async def get_cache_statistics(request: CacheStatisticsRequest):
     except Exception as e:
         logger.error(f"Error getting cache statistics: {str(e)}")
         return {"status": "error", "message": str(e)}
+
+
+# WebSocket Implementation
+
+
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: Dict[str, List[WebSocket]] = {}
+        self.connection_info: Dict[WebSocket, Dict[str, Any]] = {}
+
+    async def connect(
+        self, websocket: WebSocket, client_id: str, steam_id: Optional[int] = None
+    ):
+        await websocket.accept()
+        if client_id not in self.active_connections:
+            self.active_connections[client_id] = []
+        self.active_connections[client_id].append(websocket)
+        self.connection_info[websocket] = {
+            "client_id": client_id,
+            "steam_id": steam_id,
+            "connected_at": datetime.now(timezone.utc),
+        }
+        logger.info(f"Client {client_id} connected, steam_id: {steam_id}")
+
+    async def disconnect(self, websocket: WebSocket):
+        for client_id, connections in list(self.active_connections.items()):
+            if websocket in connections:
+                connections.remove(websocket)
+                if websocket in self.connection_info:
+                    logger.info(
+                        f"Client {self.connection_info[websocket]['client_id']} disconnected"
+                    )
+                    del self.connection_info[websocket]
+                if not connections:
+                    del self.active_connections[client_id]
+                break
+
+    async def send_personal_message(self, message: dict, websocket: WebSocket):
+        if websocket.client_state == WebSocketState.CONNECTED:
+            await websocket.send_json(message)
+
+    async def broadcast_to_client(self, message: dict, client_id: str):
+        if client_id in self.active_connections:
+            disconnected = []
+            for connection in self.active_connections[client_id]:
+                try:
+                    await connection.send_json(message)
+                except RuntimeError:
+                    disconnected.append(connection)
+
+            # Clean up any disconnected clients
+            for conn in disconnected:
+                await self.disconnect(conn)
+
+    async def broadcast_to_steam_id(self, message: dict, steam_id: int):
+        disconnected = []
+        for websocket, info in self.connection_info.items():
+            if info.get("steam_id") == steam_id:
+                try:
+                    await websocket.send_json(message)
+                except RuntimeError:
+                    disconnected.append(websocket)
+
+        # Clean up disconnected connections
+        for conn in disconnected:
+            await self.disconnect(conn)
+
+    async def broadcast(self, message: dict):
+        disconnected = []
+        for client_id, connections in self.active_connections.items():
+            for connection in connections:
+                try:
+                    await connection.send_json(message)
+                except RuntimeError:
+                    disconnected.append(connection)
+
+        # Clean up disconnected connections
+        for conn in disconnected:
+            await self.disconnect(conn)
+
+    def get_connected_clients_count(self):
+        total_connections = sum(
+            len(connections) for connections in self.active_connections.values()
+        )
+        return {
+            "total_connections": total_connections,
+            "unique_clients": len(self.active_connections),
+            "clients": {
+                client_id: len(connections)
+                for client_id, connections in self.active_connections.items()
+            },
+        }
+
+
+# Create connection manager instance
+manager = ConnectionManager()
+
+
+@app.websocket("/ws")
+async def websocket_endpoint(
+    websocket: WebSocket,
+    client_id: str = Query(...),
+    steam_id: Optional[int] = Query(None),
+):
+    await manager.connect(websocket, client_id, steam_id)
+    try:
+        while True:
+            data = await websocket.receive_text()
+            try:
+                message = json.loads(data)
+
+                # Process message based on its type
+                if "type" in message:
+                    try:
+                        if message["type"] == "ping":
+                            await manager.send_personal_message(
+                                {"type": "pong"}, websocket
+                            )
+
+                        # User Faceit data endpoints
+                        elif message["type"] == "get_user_faceit":
+                            if "steam_id" in message:
+                                faceit_data = await get_user_faceit(message["steam_id"])
+                                await manager.send_personal_message(
+                                    {
+                                        "type": "faceit_data",
+                                        "request_type": "get_user_faceit",
+                                        "steam_id": message["steam_id"],
+                                        "data": faceit_data,
+                                    },
+                                    websocket,
+                                )
+
+                        elif message["type"] == "get_user_faceit_elo":
+                            if "steam_id" in message:
+                                elo = await get_user_faceit_elo(message["steam_id"])
+                                await manager.send_personal_message(
+                                    {
+                                        "type": "faceit_data",
+                                        "request_type": "get_user_faceit_elo",
+                                        "steam_id": message["steam_id"],
+                                        "data": elo,
+                                    },
+                                    websocket,
+                                )
+
+                        elif message["type"] == "get_user_faceit_url":
+                            if "steam_id" in message:
+                                url = await get_user_faceit_url(message["steam_id"])
+                                await manager.send_personal_message(
+                                    {
+                                        "type": "faceit_data",
+                                        "request_type": "get_user_faceit_url",
+                                        "steam_id": message["steam_id"],
+                                        "data": url,
+                                    },
+                                    websocket,
+                                )
+
+                        elif message["type"] == "get_user_faceit_elo_and_url":
+                            if "steam_id" in message:
+                                data = await get_user_faceit_elo_and_url(
+                                    message["steam_id"]
+                                )
+                                await manager.send_personal_message(
+                                    {
+                                        "type": "faceit_data",
+                                        "request_type": "get_user_faceit_elo_and_url",
+                                        "steam_id": message["steam_id"],
+                                        "data": data,
+                                    },
+                                    websocket,
+                                )
+
+                        # User bans endpoint
+                        elif message["type"] == "get_user_bans":
+                            if "steam_id" in message:
+                                bans = await get_user_bans(message["steam_id"])
+                                await manager.send_personal_message(
+                                    {
+                                        "type": "user_bans",
+                                        "steam_id": message["steam_id"],
+                                        "data": bans,
+                                    },
+                                    websocket,
+                                )
+
+                        # User drops endpoint
+                        elif message["type"] == "get_user_drops":
+                            if "steam_id" in message:
+                                drops = await get_user_drops(message["steam_id"])
+                                await manager.send_personal_message(
+                                    {
+                                        "type": "user_drops",
+                                        "steam_id": message["steam_id"],
+                                        "data": drops,
+                                    },
+                                    websocket,
+                                )
+
+                        # Multi-user ranks endpoint
+                        elif message["type"] == "get_users_ranks":
+                            if "steam_ids" in message:
+                                ranks_request = RankRequest(
+                                    steam_ids=message["steam_ids"]
+                                )
+                                ranks = await get_users_ranks(ranks_request)
+                                await manager.send_personal_message(
+                                    {"type": "users_ranks", "data": ranks}, websocket
+                                )
+
+                        # Multi-user faceit data endpoint
+                        elif message["type"] == "get_users_faceit_elo_and_url":
+                            if "steam_ids" in message:
+                                faceit_request = RankRequest(
+                                    steam_ids=message["steam_ids"]
+                                )
+                                faceit_data = await get_users_faceit_elo_and_url(
+                                    faceit_request
+                                )
+                                await manager.send_personal_message(
+                                    {"type": "users_faceit_data", "data": faceit_data},
+                                    websocket,
+                                )
+
+                        # User profile data
+                        elif message["type"] == "get_profile_data":
+                            if "steam_id" in message:
+                                profile_data = await get_profile_data(
+                                    message["steam_id"]
+                                )
+                                await manager.send_personal_message(
+                                    {
+                                        "type": "profile_data",
+                                        "steam_id": message["steam_id"],
+                                        "data": profile_data,
+                                    },
+                                    websocket,
+                                )
+
+                        # Player matchup data
+                        elif message["type"] == "get_player_matchup":
+                            if (
+                                "player1_steam_id" in message
+                                and "player2_steam_id" in message
+                            ):
+                                matchup = await get_player_matchup(
+                                    message["player1_steam_id"],
+                                    message["player2_steam_id"],
+                                )
+                                await manager.send_personal_message(
+                                    {"type": "player_matchup", "data": matchup},
+                                    websocket,
+                                )
+
+                        # Teams map stats
+                        elif message["type"] == "get_teams_map_stats":
+                            if (
+                                "team1_steam_ids" in message
+                                and "team2_steam_ids" in message
+                            ):
+                                map_stats_request = TeamMapStatsRequest(
+                                    team1_steam_ids=message["team1_steam_ids"],
+                                    team2_steam_ids=message["team2_steam_ids"],
+                                )
+                                map_stats = await get_teams_map_stats(map_stats_request)
+                                await manager.send_personal_message(
+                                    {"type": "teams_map_stats", "data": map_stats},
+                                    websocket,
+                                )
+
+                        # Players stats
+                        elif message["type"] == "get_players_stats":
+                            if "steam_ids" in message:
+                                stats_request = PlayerStatsRequest(
+                                    steam_ids=message["steam_ids"]
+                                )
+                                stats = await get_players_stats(stats_request)
+                                await manager.send_personal_message(
+                                    {"type": "players_stats", "data": stats}, websocket
+                                )
+
+                        # User last matches
+                        elif message["type"] == "get_user_last_matches":
+                            if "steam_id" in message:
+                                limit = message.get("limit", 3)
+                                matches = await get_user_last_matches(
+                                    message["steam_id"], limit
+                                )
+                                await manager.send_personal_message(
+                                    {
+                                        "type": "user_last_matches",
+                                        "steam_id": message["steam_id"],
+                                        "data": matches,
+                                    },
+                                    websocket,
+                                )
+
+                        # Live matches
+                        elif message["type"] == "get_live_matches":
+                            matches = await get_live_matches()
+                            await manager.send_personal_message(
+                                {"type": "live_matches", "data": matches}, websocket
+                            )
+
+                        # Faceit elo by names
+                        elif message["type"] == "get_faceit_elo_by_names":
+                            if "player_names" in message:
+                                names_request = PlayerNamesRequest(
+                                    player_names=message["player_names"]
+                                )
+                                elo_data = await get_faceit_elo_by_names(names_request)
+                                await manager.send_personal_message(
+                                    {"type": "faceit_elo_by_names", "data": elo_data},
+                                    websocket,
+                                )
+
+                        else:
+                            logger.info(
+                                f"Received unknown message type: {message['type']}"
+                            )
+                            await manager.send_personal_message(
+                                {
+                                    "type": "error",
+                                    "message": f"Unknown message type: {message['type']}",
+                                },
+                                websocket,
+                            )
+
+                    except Exception as e:
+                        logger.error(
+                            f"Error processing {message['type']} request: {str(e)}"
+                        )
+                        await manager.send_personal_message(
+                            {
+                                "type": "error",
+                                "request_type": message.get("type"),
+                                "message": f"Error processing request: {str(e)}",
+                            },
+                            websocket,
+                        )
+
+                else:
+                    logger.info(f"Received message without type: {message}")
+                    await manager.send_personal_message(
+                        {
+                            "type": "error",
+                            "message": "Message must include a 'type' field",
+                        },
+                        websocket,
+                    )
+
+            except json.JSONDecodeError:
+                logger.error(f"Received invalid JSON: {data}")
+                await manager.send_personal_message(
+                    {"type": "error", "message": "Invalid JSON"}, websocket
+                )
+    except WebSocketDisconnect:
+        await manager.disconnect(websocket)
+    except Exception as e:
+        logger.error(f"WebSocket error: {str(e)}")
+        await manager.disconnect(websocket)
+
+
+@app.post("/admin/broadcast")
+async def broadcast_to_clients(
+    message: dict,
+    client_id: Optional[str] = None,
+    steam_id: Optional[int] = None,
+    admin_key: str = Query(...),
+):
+    """
+    Broadcast a message to connected WebSocket clients.
+    Can target specific clients by client_id or steam_id, or broadcast to all.
+    Requires admin key for security.
+    """
+    admin_key_expected = config("ADMIN_API_KEY", default="")
+    if not admin_key_expected or admin_key != admin_key_expected:
+        return {"status": "error", "message": "Invalid admin key"}
+
+    try:
+        if client_id:
+            await manager.broadcast_to_client(message, client_id)
+            return {
+                "status": "success",
+                "message": f"Broadcasted to client {client_id}",
+            }
+        elif steam_id:
+            await manager.broadcast_to_steam_id(message, steam_id)
+            return {
+                "status": "success",
+                "message": f"Broadcasted to steam_id {steam_id}",
+            }
+        else:
+            await manager.broadcast(message)
+            return {"status": "success", "message": "Broadcasted to all clients"}
+    except Exception as e:
+        logger.error(f"Error broadcasting message: {str(e)}")
+        return {"status": "error", "message": str(e)}
+
+
+@app.get("/admin/connections")
+async def get_connections(admin_key: str = Query(...)):
+    """
+    Get information about current WebSocket connections.
+    Requires admin key for security.
+    """
+    admin_key_expected = config("ADMIN_API_KEY", default="")
+    if not admin_key_expected or admin_key != admin_key_expected:
+        return {"status": "error", "message": "Invalid admin key"}
+
+    return {"status": "success", "connections": manager.get_connected_clients_count()}
