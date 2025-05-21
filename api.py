@@ -1259,3 +1259,65 @@ async def get_connections(admin_key: str = Query(...)):
         return {"status": "error", "message": "Invalid admin key"}
 
     return {"status": "success", "connections": manager.get_connected_clients_count()}
+
+
+@app.get("/get_user_renown_stats")
+@cache_manager.cached(ttl_seconds=300)  # Cache for 5 minutes
+async def get_user_renown_stats(steam_id: int):
+    logger.info(f"Getting Renown stats for user {steam_id}")
+    player = Player.select().where(Player.steam_id == steam_id).first()
+
+    if player is None:
+        logger.info(f"No player found with steam_id {steam_id}")
+        return {
+            "current_elo": None,
+            "highest_elo": None,
+            "kd": None,
+            "winrate": None,
+            "total_games": 0,
+        }
+
+    # Get current ELO from player table
+    current_elo = player.elo
+
+    # Get all stats for this player
+    player_stats = Stat.select().where(Stat.player == player)
+
+    # Initialize variables
+    highest_elo = current_elo
+    total_kills = 0
+    total_deaths = 0
+    total_games = 0
+    wins = 0
+
+    # Calculate stats from match history
+    for stat in player_stats:
+        # Update highest ELO
+        before_elo = stat.elo_before_match
+        after_elo = stat.elo_before_match + stat.elo_change
+        highest_elo = max(highest_elo, before_elo, after_elo)
+
+        # Update K/D stats
+        total_kills += stat.kills
+        total_deaths += stat.deaths
+
+        # Update win count
+        match = stat.match
+        if match.winner == "team1" and stat.team == "team1":
+            wins += 1
+        elif match.winner == "team2" and stat.team == "team2":
+            wins += 1
+
+        total_games += 1
+
+    # Calculate final statistics
+    kd = round(total_kills / total_deaths, 2) if total_deaths > 0 else total_kills
+    winrate = round((wins / total_games * 100), 2) if total_games > 0 else 0
+
+    return {
+        "current_elo": current_elo,
+        "highest_elo": highest_elo,
+        "kd": kd,
+        "winrate": winrate,
+        "total_games": total_games,
+    }
