@@ -1278,21 +1278,12 @@ async def get_user_renown_stats(steam_id: int):
             "leaderboard_position": None,
         }
 
-    # Get current ELO from player table
     current_elo = player.elo
 
-    # Calculate leaderboard position
-    # Count players with higher ELO (including those with same ELO but different steam_id)
     leaderboard_position = (
-        Player.select()
-        .where(
-            (Player.elo > current_elo)
-            | ((Player.elo == current_elo) & (Player.steam_id < steam_id))
-        )
-        .count()
-    ) + 1  # Add 1 because position is 1-based
+        Player.select().where((Player.elo >= current_elo)).count()
+    ) + 1
 
-    # Get all stats for this player, excluding cancelled matches
     player_stats = (
         Stat.select()
         .join(Match)
