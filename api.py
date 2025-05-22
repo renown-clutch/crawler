@@ -18,6 +18,7 @@ from clutch.cache_invalidator import (
     run_cache_invalidation_job,
     set_clear_faceit_cache_func,
 )
+from clutch.chat import chat_manager
 from clutch.db.models import (
     Ban,
     Drop,
@@ -87,6 +88,9 @@ async def startup_event():
 
     # Register the clear_faceit_cache function with the cache invalidator
     set_clear_faceit_cache_func(clear_faceit_cache)
+
+    # Set the connection manager for chat
+    chat_manager.set_connection_manager(manager)
 
     # Run the job in the background to not block API startup
     asyncio.create_task(run_cache_invalidation_job(interval_seconds=60))
@@ -966,6 +970,25 @@ async def websocket_endpoint(
                                 {"type": "pong"}, websocket
                             )
 
+                        # Chat message handling
+                        elif message["type"] == "send_chat_message":
+                            if "username" in message and "message" in message:
+                                message_data = await chat_manager.add_message(
+                                    message["username"], message["message"]
+                                )
+                                await manager.send_personal_message(
+                                    {"type": "chat_message_sent", "data": message_data},
+                                    websocket,
+                                )
+
+                        # Get recent messages
+                        elif message["type"] == "get_recent_messages":
+                            limit = message.get("limit", 50)
+                            messages = await chat_manager.get_recent_messages(limit)
+                            await manager.send_personal_message(
+                                {"type": "recent_messages", "data": messages}, websocket
+                            )
+
                         # User Faceit data endpoints
                         elif message["type"] == "get_user_faceit":
                             if "steam_id" in message:
@@ -1329,3 +1352,30 @@ async def get_user_renown_stats(steam_id: int):
         "total_games": total_games,
         "leaderboard_position": leaderboard_position,
     }
+
+
+class ChatMessageRequest(BaseModel):
+    username: str
+    message: str
+
+
+@app.post("/send_chat_message")
+async def send_chat_message(request: ChatMessageRequest):
+    """Send a chat message."""
+    try:
+        message_data = await chat_manager.add_message(request.username, request.message)
+        return {"status": "success", "data": message_data}
+    except Exception as e:
+        logger.error(f"Error sending chat message: {str(e)}")
+        return {"status": "error", "message": str(e)}
+
+
+@app.get("/get_recent_messages")
+async def get_recent_messages(limit: int = 50):
+    """Get recent chat messages."""
+    try:
+        messages = await chat_manager.get_recent_messages(limit)
+        return {"status": "success", "data": messages}
+    except Exception as e:
+        logger.error(f"Error getting recent messages: {str(e)}")
+        return {"status": "error", "message": str(e)}
