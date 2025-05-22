@@ -1281,7 +1281,7 @@ async def get_user_renown_stats(steam_id: int):
     current_elo = player.elo
 
     leaderboard_position = (
-        Player.select().where((Player.elo >= current_elo)).count()
+        Player.select().where((Player.elo > current_elo)).count()
     ) + 1
 
     player_stats = (
