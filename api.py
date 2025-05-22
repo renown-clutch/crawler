@@ -1262,7 +1262,7 @@ async def get_connections(admin_key: str = Query(...)):
 
 
 @app.get("/get_user_renown_stats")
-@cache_manager.cached(ttl_seconds=300)  # Cache for 5 minutes
+@cache_manager.cached(ttl_seconds=300)
 async def get_user_renown_stats(steam_id: int):
     logger.info(f"Getting Renown stats for user {steam_id}")
     player = Player.select().where(Player.steam_id == steam_id).first()
@@ -1280,8 +1280,12 @@ async def get_user_renown_stats(steam_id: int):
     # Get current ELO from player table
     current_elo = player.elo
 
-    # Get all stats for this player
-    player_stats = Stat.select().where(Stat.player == player)
+    # Get all stats for this player, excluding cancelled matches
+    player_stats = (
+        Stat.select()
+        .join(Match)
+        .where((Stat.player == player) & (Match.status != "CANCELLED"))
+    )
 
     # Initialize variables
     highest_elo = current_elo
