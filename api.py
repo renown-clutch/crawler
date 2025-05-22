@@ -236,7 +236,7 @@ class RankRequest(BaseModel):
 @cache_manager.cached(ttl_seconds=300)  # Cache for 5 minutes
 async def get_users_ranks(request: RankRequest):
     steam_ids = request.steam_ids
-    logger.info(f"Getting ranks for users: {steam_ids}")
+
     results = {steam_id: None for steam_id in steam_ids}
 
     if not steam_ids:
@@ -1379,3 +1379,9 @@ async def get_recent_messages(limit: int = 50):
     except Exception as e:
         logger.error(f"Error getting recent messages: {str(e)}")
         return {"status": "error", "message": str(e)}
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    uvicorn.run("api:app", host="0.0.0.0", port=8000)
