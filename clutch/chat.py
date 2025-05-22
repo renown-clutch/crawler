@@ -12,6 +12,8 @@ logger = logging.getLogger(__name__)
 REDIS_HOST = config("REDIS_HOST", default="localhost")
 REDIS_PORT = config("REDIS_PORT", default=6379, cast=int)
 REDIS_DB = config("REDIS_DB", default=0, cast=int)
+REDIS_PASSWORD = config("REDIS_PW", default="")
+REDIS_USERNAME = config("REDIS_USERNAME", default="")
 
 # Redis keys
 CHAT_MESSAGES_KEY = "chat:messages"
@@ -21,7 +23,12 @@ MAX_MESSAGES = 100
 class ChatManager:
     def __init__(self):
         self.redis_client = redis.Redis(
-            host=REDIS_HOST, port=REDIS_PORT, db=REDIS_DB, decode_responses=True
+            host=REDIS_HOST,
+            port=REDIS_PORT,
+            db=REDIS_DB,
+            decode_responses=True,
+            password=REDIS_PASSWORD,
+            username=REDIS_USERNAME,
         )
         self.connection_manager = None  # Will be set by api.py
 
