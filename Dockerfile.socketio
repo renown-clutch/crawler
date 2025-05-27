@@ -21,7 +21,7 @@ ENV PATH="/opt/venv/bin:$PATH"
 COPY . .
 
 # Expose Socket.IO port
-EXPOSE 8001
+EXPOSE 80
 
 # Set environment variables for production
 ENV PYTHONUNBUFFERED=1
@@ -29,4 +29,4 @@ ENV PYTHONIOENCODING=utf-8
 ENV ENV=production
 
 # Command to run Socket.IO server with uvicorn
-CMD ["uvicorn", "socketio_server:app", "--host", "0.0.0.0", "--port", "8001", "--proxy-headers", "--forwarded-allow-ips=*"] 
+CMD ["uvicorn", "socketio_server:app", "--host", "0.0.0.0", "--port", "80", "--proxy-headers", "--forwarded-allow-ips=*"] 
