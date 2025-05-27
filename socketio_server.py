@@ -619,24 +619,26 @@ def get_connected_clients_info():
     }
 
 
+# Set the connection manager for chat (moved outside of __main__ block)
+class SocketIOConnectionManager:
+    async def broadcast(self, message):
+        # Extract the message type and emit the appropriate event
+        message_type = message.get("type")
+        if message_type == "chat_message":
+            # Emit chat message to all clients
+            await sio.emit("chat_message", message)
+        else:
+            # For other types, use the general broadcast event
+            await sio.emit("broadcast", message)
+
+
+# Set the connection manager immediately
+chat_manager.set_connection_manager(SocketIOConnectionManager())
+
 # Create ASGI app after defining all events
 app = socketio.ASGIApp(sio)
 
 if __name__ == "__main__":
     import uvicorn
-
-    # Set the connection manager for chat (similar to the main API)
-    class SocketIOConnectionManager:
-        async def broadcast(self, message):
-            # Extract the message type and emit the appropriate event
-            message_type = message.get("type")
-            if message_type == "chat_message":
-                # Emit chat message to all clients
-                await sio.emit("chat_message", message)
-            else:
-                # For other types, use the general broadcast event
-                await sio.emit("broadcast", message)
-
-    chat_manager.set_connection_manager(SocketIOConnectionManager())
 
     uvicorn.run(app, host="0.0.0.0", port=80)
