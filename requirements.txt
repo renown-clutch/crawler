@@ -34,6 +34,8 @@ Pygments==2.19.1
 python-decouple==3.8
 python-dotenv==1.1.0
 python-multipart==0.0.20
+python-socketio==5.11.4
+python-engineio==4.9.1
 python-telegram-bot==22.0
 PyYAML==6.0.2
 redis==5.0.1
