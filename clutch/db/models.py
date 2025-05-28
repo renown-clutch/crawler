@@ -149,6 +149,7 @@ class UserCrawlTask(BaseModel):
     processed = BooleanField(default=False)
     created_at = DateTimeTZField(default=now)
     page_html = TextField(null=False)
+    error_occured = BooleanField(default=False)
 
     class Meta:
         table_name = "user_crawl_task"

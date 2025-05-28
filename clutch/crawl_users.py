@@ -84,51 +84,96 @@ def extract_user_data_from_html(html_content: str, steam_id: int) -> Optional[di
 def create_or_update_player_from_crawl(user_data: dict) -> Player:
     """Create or update a player from crawled user data."""
     steam_id = user_data["steam_id"]
+    original_name = user_data["name"]
 
-    player, created = Player.get_or_create(
-        steam_id=steam_id,
-        defaults={
-            "name": user_data["name"],
-            "elo": user_data["elo"],
-            "country": user_data.get("country", "unknown"),
-            "avatar_url": user_data.get("avatar_url", ""),
-            "registered_since": user_data.get("registered_since"),
-        },
-    )
-
-    if created:
-        logger.info(
-            f"Created new player {player.name} (steam_id: {steam_id}) from crawl"
+    try:
+        player, created = Player.get_or_create(
+            steam_id=steam_id,
+            defaults={
+                "name": original_name,
+                "elo": user_data["elo"],
+                "country": user_data.get("country", "unknown"),
+                "avatar_url": user_data.get("avatar_url", ""),
+                "registered_since": user_data.get("registered_since"),
+            },
         )
-    else:
-        # Update existing player data
-        updated = False
-        if player.name != user_data["name"]:
-            player.name = user_data["name"]
-            updated = True
-        if player.elo != user_data["elo"]:
-            player.elo = user_data["elo"]
-            updated = True
-        if player.country != user_data.get("country", "unknown"):
-            player.country = user_data.get("country", "unknown")
-            updated = True
-        if player.avatar_url != user_data.get("avatar_url", ""):
-            player.avatar_url = user_data.get("avatar_url", "")
-            updated = True
-        if (
-            user_data.get("registered_since")
-            and player.registered_since != user_data["registered_since"]
-        ):
-            player.registered_since = user_data["registered_since"]
-            updated = True
 
-        if updated:
-            player.save()
+        if created:
             logger.info(
-                f"Updated player {player.name} (steam_id: {steam_id}) from crawl"
+                f"Created new player {player.name} (steam_id: {steam_id}) from crawl"
+            )
+        else:
+            # Update existing player data
+            updated = False
+            if player.name != original_name:
+                player.name = original_name
+                updated = True
+            if player.elo != user_data["elo"]:
+                player.elo = user_data["elo"]
+                updated = True
+            if player.country != user_data.get("country", "unknown"):
+                player.country = user_data.get("country", "unknown")
+                updated = True
+            if player.avatar_url != user_data.get("avatar_url", ""):
+                player.avatar_url = user_data.get("avatar_url", "")
+                updated = True
+            if (
+                user_data.get("registered_since")
+                and player.registered_since != user_data["registered_since"]
+            ):
+                player.registered_since = user_data["registered_since"]
+                updated = True
+
+            if updated:
+                player.save()
+                logger.info(
+                    f"Updated player {player.name} (steam_id: {steam_id}) from crawl"
+                )
+
+        return player
+
+    except Exception as e:
+        # Handle duplicate name constraint
+        if "duplicate key value violates unique constraint" in str(
+            e
+        ) and "player_name" in str(e):
+            logger.warning(
+                f"Player name '{original_name}' already exists, creating with unique name"
             )
 
-    return player
+            # Create a unique name by appending the steam_id
+            unique_name = f"{original_name}_{steam_id}"
+
+            try:
+                player, created = Player.get_or_create(
+                    steam_id=steam_id,
+                    defaults={
+                        "name": unique_name,
+                        "elo": user_data["elo"],
+                        "country": user_data.get("country", "unknown"),
+                        "avatar_url": user_data.get("avatar_url", ""),
+                        "registered_since": user_data.get("registered_since"),
+                    },
+                )
+
+                if created:
+                    logger.info(
+                        f"Created new player {player.name} (steam_id: {steam_id}) with unique name from crawl"
+                    )
+
+                return player
+
+            except Exception as retry_error:
+                logger.error(
+                    f"Failed to create player even with unique name for steam_id {steam_id}: {str(retry_error)}"
+                )
+                raise
+        else:
+            # Re-raise other exceptions
+            logger.error(
+                f"Error creating/updating player for steam_id {steam_id}: {str(e)}"
+            )
+            raise
 
 
 async def crawl_single_user(steam_id: int, page: Page) -> str:
@@ -147,6 +192,29 @@ async def crawl_single_user(steam_id: int, page: Page) -> str:
         not_found = await page.query_selector(not_found_selector)
         if not_found:
             logger.info(f"User profile {steam_id} does not exist (404)")
+
+            # Mark the task as processed with error for 404s so we don't retry
+            with db.atomic() as transaction:
+                try:
+                    task = (
+                        UserCrawlTask.select()
+                        .where(UserCrawlTask.steam_id == steam_id)
+                        .first()
+                    )
+                    if task:
+                        task.page_html = html_content
+                        task.processed = True
+                        task.error_occured = True
+                        task.save()
+                        logger.info(
+                            f"Marked task for steam_id {steam_id} as processed with error (404)"
+                        )
+                except Exception as e:
+                    logger.error(
+                        f"Error updating task for 404 user {steam_id}: {str(e)}"
+                    )
+                    transaction.rollback()
+
             return "404"
 
         # Extract user data from HTML
@@ -164,12 +232,14 @@ async def crawl_single_user(steam_id: int, page: Page) -> str:
                     if task:
                         task.page_html = html_content
                         task.processed = True
+                        task.error_occured = False
                         task.save()
                     else:
                         task = UserCrawlTask.create(
                             steam_id=steam_id,
                             page_html=html_content,
                             processed=True,
+                            error_occured=False,
                         )
 
                     # Create or update the player
@@ -180,13 +250,77 @@ async def crawl_single_user(steam_id: int, page: Page) -> str:
                 except Exception as e:
                     logger.error(f"Error processing user {steam_id}: {str(e)}")
                     transaction.rollback()
+
+                    # Mark task as processed with error if there's a database issue
+                    try:
+                        task = (
+                            UserCrawlTask.select()
+                            .where(UserCrawlTask.steam_id == steam_id)
+                            .first()
+                        )
+                        if task:
+                            task.processed = True
+                            task.error_occured = True
+                            task.save()
+                            logger.info(
+                                f"Marked task for steam_id {steam_id} as processed with error due to: {str(e)}"
+                            )
+                    except Exception as save_error:
+                        logger.error(
+                            f"Could not mark task as error for {steam_id}: {str(save_error)}"
+                        )
+
                     return "error"
         else:
             logger.warning(f"Could not extract user data for {steam_id}")
+
+            # Mark task as processed with error if we can't extract data
+            with db.atomic() as transaction:
+                try:
+                    task = (
+                        UserCrawlTask.select()
+                        .where(UserCrawlTask.steam_id == steam_id)
+                        .first()
+                    )
+                    if task:
+                        task.page_html = html_content
+                        task.processed = True
+                        task.error_occured = True
+                        task.save()
+                        logger.info(
+                            f"Marked task for steam_id {steam_id} as processed with error (no data extracted)"
+                        )
+                except Exception as e:
+                    logger.error(
+                        f"Error updating task for no-data user {steam_id}: {str(e)}"
+                    )
+                    transaction.rollback()
+
             return "no_data"
 
     except Exception as e:
         logger.error(f"Error crawling user {steam_id}: {str(e)}")
+
+        # Mark task as processed with error for any other exceptions
+        try:
+            with db.atomic():
+                task = (
+                    UserCrawlTask.select()
+                    .where(UserCrawlTask.steam_id == steam_id)
+                    .first()
+                )
+                if task:
+                    task.processed = True
+                    task.error_occured = True
+                    task.save()
+                    logger.info(
+                        f"Marked task for steam_id {steam_id} as processed with error due to exception: {str(e)}"
+                    )
+        except Exception as save_error:
+            logger.error(
+                f"Could not mark task as error for {steam_id}: {str(save_error)}"
+            )
+
         if "Target page, context or browser has been closed" in str(e):
             return "context_closed"
         return "error"
@@ -216,7 +350,7 @@ async def process_user_crawl_tasks(context: Optional[BrowserContext] = None) -> 
 
     own_context = context is None
     if own_context:
-        playwright, browser, context = await setup_browser(include_cookies=True)
+        playwright, browser, context = await setup_browser(include_cookies=False)
 
     try:
         # Get unprocessed user crawl tasks
@@ -239,9 +373,6 @@ async def process_user_crawl_tasks(context: Optional[BrowserContext] = None) -> 
                 logger.info(f"Processing user crawl task for steam_id {task.steam_id}")
                 status = await crawl_single_user(task.steam_id, page)
                 logger.info(f"Processed user {task.steam_id}: status={status}")
-
-                # Add a small delay between requests to be respectful
-                await asyncio.sleep(2)
 
         finally:
             await page.close()
