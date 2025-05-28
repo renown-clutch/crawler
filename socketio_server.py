@@ -61,7 +61,7 @@ from api import (
 )
 from clutch.chat import chat_manager
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.ERROR)
 logger = logging.getLogger(__name__)
 
 # Create Socket.IO server with CORS enabled and async_mode set to 'asgi'

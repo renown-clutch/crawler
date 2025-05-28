@@ -10,6 +10,7 @@ from telegram import Bot
 from .browser_tools import check_renown_login, cleanup_browser, setup_browser
 from .crawl_banlist import process_new_bans
 from .crawl_matches import combined_match_crawler_job, crawl_new_matches
+from .crawl_users import user_crawl_job
 from .telegram_utils import send_alert
 
 logging.basicConfig(level=logging.INFO)
@@ -165,6 +166,31 @@ async def combined_match_crawler_wrapper():
         await cleanup_task("combined_crawler")
 
 
+async def user_crawl_wrapper():
+    """Wrapper for user crawl job to ensure proper cleanup."""
+    # Clean up any existing task first
+    await cleanup_task("user_crawl")
+
+    # Allow only one instance to run at a time
+    if "user_crawl" in _running_tasks:
+        logger.warning("User crawl job already running, skipping this execution")
+        return
+
+    try:
+        # Store the task info
+        _running_tasks["user_crawl"] = (None, None)
+
+        # Run the actual job
+        await user_crawl_job()
+        logger.info("User crawl job completed successfully")
+    except Exception as e:
+        logger.error(f"Error in user crawl wrapper: {str(e)}")
+        await send_alert(f"Error in user crawl job: {str(e)}")
+    finally:
+        # Clean up
+        await cleanup_task("user_crawl")
+
+
 scheduler = AsyncIOScheduler()
 
 scheduler.add_job(
@@ -211,6 +237,19 @@ scheduler.add_job(
     misfire_grace_time=300,  # 5 minutes
     coalesce=True,
     next_run_time=datetime.now() + timedelta(seconds=15),
+)
+
+scheduler.add_job(
+    user_crawl_wrapper,
+    trigger="interval",
+    minutes=5,  # Run every 5 minutes
+    id="user_crawl",
+    name="Crawl user profiles",
+    replace_existing=True,
+    misfire_grace_time=300,  # 5 minutes
+    coalesce=True,
+    next_run_time=datetime.now() + timedelta(seconds=20),
+    max_instances=1,  # Ensure only one instance runs at a time
 )
 
 

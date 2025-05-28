@@ -26,6 +26,7 @@ from clutch.db.models import (
     Match,
     Player,
     Stat,
+    UserCrawlTask,
 )
 from clutch.middleware import RequestLoggingMiddleware
 
@@ -242,12 +243,41 @@ async def get_users_ranks(request: RankRequest):
     if not steam_ids:
         return results
 
+    # Get all players that exist in our database for the requested steam_ids
     players = Player.select(Player.steam_id, Player.elo).where(
         Player.steam_id.in_(steam_ids)
     )
 
+    # Track which steam_ids we found in the Player table
+    found_steam_ids = set()
     for player in players:
         results[player.steam_id] = player.elo
+        found_steam_ids.add(player.steam_id)
+
+    # Only create user crawl tasks for steam_ids that don't exist as players at all
+    missing_steam_ids = set(steam_ids) - found_steam_ids
+    if missing_steam_ids:
+        logger.info(
+            f"Creating user crawl tasks for missing players: {missing_steam_ids}"
+        )
+
+        # Create tasks for missing users (don't await since we want this to be fast)
+        for steam_id in missing_steam_ids:
+            try:
+                # Use get_or_create to avoid duplicates
+                task, created = UserCrawlTask.get_or_create(
+                    steam_id=steam_id,
+                    defaults={
+                        "page_html": "",
+                        "processed": False,
+                    },
+                )
+                if created:
+                    logger.info(
+                        f"Created user crawl task for missing player {steam_id}"
+                    )
+            except Exception as e:
+                logger.error(f"Error creating user crawl task for {steam_id}: {str(e)}")
 
     return results
 
