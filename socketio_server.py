@@ -66,7 +66,7 @@ logger = logging.getLogger(__name__)
 
 # Create Socket.IO server with CORS enabled and async_mode set to 'asgi'
 sio = socketio.AsyncServer(
-    cors_allowed_origins="*", logger=True, engineio_logger=True, async_mode="asgi"
+    cors_allowed_origins="*", logger=False, engineio_logger=False, async_mode="asgi"
 )
 
 # Store client information
@@ -292,6 +292,7 @@ async def get_user_bans(sid, data):
             return
 
         bans = await api_get_user_bans(steam_id)
+        logger.info(f"User {steam_id} has {len(bans)} bans")
         await sio.emit("user_bans", {"steam_id": steam_id, "data": bans}, room=sid)
 
     except Exception as e:
