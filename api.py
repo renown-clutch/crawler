@@ -824,6 +824,32 @@ async def get_faceit_elo_by_names(request: PlayerNamesRequest):
     return results
 
 
+@app.post("/get_steam_ids_by_names")
+@cache_manager.cached(ttl_seconds=300)  # Cache for 5 minutes
+async def get_steam_ids_by_names(request: PlayerNamesRequest):
+    logger.info(f"Getting steam IDs for players by names: {request.player_names}")
+    results = {name: None for name in request.player_names}
+
+    # Find players by name with case insensitivity
+    players = Player.select(Player.name, Player.steam_id).where(
+        fn.LOWER(Player.name).in_([name.lower() for name in request.player_names])
+    )
+
+    # Create a map of lowercase names to actual player data for case-insensitive matching
+    player_map = {
+        player.name.lower(): {"name": player.name, "steam_id": player.steam_id}
+        for player in players
+    }
+
+    # Map the results back to the original requested names (preserving case)
+    for requested_name in request.player_names:
+        lowercase_name = requested_name.lower()
+        if lowercase_name in player_map:
+            results[requested_name] = player_map[lowercase_name]["steam_id"]
+
+    return results
+
+
 class CacheInvalidationRequest(BaseModel):
     pattern: str
     admin_key: str
@@ -1214,6 +1240,23 @@ async def websocket_endpoint(
                                 elo_data = await get_faceit_elo_by_names(names_request)
                                 await manager.send_personal_message(
                                     {"type": "faceit_elo_by_names", "data": elo_data},
+                                    websocket,
+                                )
+
+                        # Steam IDs by names
+                        elif message["type"] == "get_steam_ids_by_names":
+                            if "player_names" in message:
+                                names_request = PlayerNamesRequest(
+                                    player_names=message["player_names"]
+                                )
+                                steam_ids_data = await get_steam_ids_by_names(
+                                    names_request
+                                )
+                                await manager.send_personal_message(
+                                    {
+                                        "type": "steam_ids_by_names",
+                                        "data": steam_ids_data,
+                                    },
                                     websocket,
                                 )
 

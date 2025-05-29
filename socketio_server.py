@@ -27,6 +27,9 @@ from api import (
     get_profile_data as api_get_profile_data,
 )
 from api import (
+    get_steam_ids_by_names as api_get_steam_ids_by_names,
+)
+from api import (
     get_teams_map_stats as api_get_teams_map_stats,
 )
 from api import (
@@ -553,6 +556,32 @@ async def get_faceit_elo_by_names(sid, data):
         await sio.emit(
             "error",
             {"message": f"Error getting faceit elo by names: {str(e)}"},
+            room=sid,
+        )
+
+
+@sio.event
+async def get_steam_ids_by_names(sid, data):
+    """Handle getting steam IDs by player names"""
+    try:
+        if data is None:
+            await sio.emit("error", {"message": "player_names is required"}, room=sid)
+            return
+
+        player_names = data.get("player_names")
+        if not player_names:
+            await sio.emit("error", {"message": "player_names is required"}, room=sid)
+            return
+
+        names_request = PlayerNamesRequest(player_names=player_names)
+        steam_ids_data = await api_get_steam_ids_by_names(names_request)
+        await sio.emit("steam_ids_by_names", {"data": steam_ids_data}, room=sid)
+
+    except Exception as e:
+        logger.error(f"Error getting steam IDs by names: {str(e)}")
+        await sio.emit(
+            "error",
+            {"message": f"Error getting steam IDs by names: {str(e)}"},
             room=sid,
         )
 
