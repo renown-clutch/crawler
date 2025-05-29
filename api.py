@@ -845,8 +845,7 @@ async def get_steam_ids_by_names(request: PlayerNamesRequest):
     for requested_name in request.player_names:
         lowercase_name = requested_name.lower()
         if lowercase_name in player_map:
-            results[requested_name] = player_map[lowercase_name]["steam_id"]
-
+            results[requested_name] = str(player_map[lowercase_name]["steam_id"])
     return results
 
 

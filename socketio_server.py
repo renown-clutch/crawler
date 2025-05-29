@@ -295,7 +295,6 @@ async def get_user_bans(sid, data):
             return
 
         bans = await api_get_user_bans(steam_id)
-        logger.info(f"User {steam_id} has {len(bans)} bans")
         await sio.emit("user_bans", {"steam_id": steam_id, "data": bans}, room=sid)
 
     except Exception as e:
