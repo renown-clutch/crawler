@@ -5,7 +5,6 @@ from datetime import datetime, timezone
 from typing import Dict, Optional
 
 from clutch.db.models import SessionRequest, UserSession
-from clutch.geo_service import lookup_ip_location
 
 logger = logging.getLogger(__name__)
 
@@ -75,7 +74,7 @@ class SessionTracker:
         client_id: Optional[str] = None,
         steam_id: Optional[int] = None,
     ) -> UserSession:
-        """Create a new user session with geo-location lookup."""
+        """Create a new user session."""
 
         ip_address = self._extract_ip_from_environ(environ)
         user_agent = self._extract_user_agent(environ)
@@ -99,9 +98,6 @@ class SessionTracker:
             except Exception as e:
                 logger.error(f"Error checking for existing session: {e}")
 
-        # Get geo location data
-        geo_data = await lookup_ip_location(ip_address)
-
         # Determine connection count
         connection_count = 1
         if existing_session:
@@ -122,23 +118,13 @@ class SessionTracker:
                 client_id=client_id,
                 ip_address=ip_address,
                 user_agent=user_agent,
-                geo_country=geo_data["country"],
-                geo_country_code=geo_data["country_code"],
-                geo_region=geo_data["region"],
-                geo_city=geo_data["city"],
-                geo_latitude=geo_data["latitude"],
-                geo_longitude=geo_data["longitude"],
-                geo_timezone=geo_data["timezone"],
-                geo_isp=geo_data["isp"],
                 connection_count=connection_count,
             )
 
             # Cache in memory
             self._sessions[session_id] = session
 
-            logger.info(
-                f"Session created: {session_id} from {geo_data['city']}, {geo_data['country']}"
-            )
+            logger.info(f"Session created: {session_id}")
             return session
 
         except Exception as e:

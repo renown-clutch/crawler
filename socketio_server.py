@@ -762,11 +762,6 @@ async def shutdown_tasks():
     # Shutdown session tracker
     await session_tracker.shutdown()
 
-    # Cleanup geo service
-    from clutch.geo_service import cleanup_geo_service
-
-    await cleanup_geo_service()
-
     logger.info("Background services shut down")
 
 

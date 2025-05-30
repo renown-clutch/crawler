@@ -202,16 +202,6 @@ class UserSession(BaseModel):
     ip_address = TextField(null=False, index=True)
     user_agent = TextField(null=True)
 
-    # Geo location data from IP
-    geo_country = TextField(null=True)
-    geo_country_code = TextField(null=True)
-    geo_region = TextField(null=True)
-    geo_city = TextField(null=True)
-    geo_latitude = FloatField(null=True)
-    geo_longitude = FloatField(null=True)
-    geo_timezone = TextField(null=True)
-    geo_isp = TextField(null=True)
-
     # Session timing
     connected_at = DateTimeTZField(default=now, index=True)
     disconnected_at = DateTimeTZField(null=True, index=True)

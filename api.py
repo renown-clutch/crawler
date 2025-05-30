@@ -1457,22 +1457,6 @@ async def get_session_analytics(request: SessionAnalyticsRequest):
             .count()
         )
 
-        # Geographic distribution
-        geo_stats = {}
-        for session in UserSession.select().where(
-            UserSession.connected_at >= cutoff_time
-        ):
-            country = session.geo_country or "Unknown"
-            if country not in geo_stats:
-                geo_stats[country] = {"count": 0, "cities": set()}
-            geo_stats[country]["count"] += 1
-            if session.geo_city:
-                geo_stats[country]["cities"].add(session.geo_city)
-
-        # Convert sets to lists for JSON serialization
-        for country in geo_stats:
-            geo_stats[country]["cities"] = list(geo_stats[country]["cities"])
-
         # Request statistics
         total_requests = (
             SessionRequest.select()
@@ -1546,7 +1530,6 @@ async def get_session_analytics(request: SessionAnalyticsRequest):
                     "total": total_requests,
                     "by_type": request_types,
                 },
-                "geography": geo_stats,
                 "top_users_by_requests": top_users,
             },
         }
@@ -1587,10 +1570,6 @@ async def get_session_details(request: SessionAnalyticsRequest):
                     "client_id": session.client_id,
                     "ip_address": session.ip_address,
                     "user_agent": session.user_agent,
-                    "geo_country": session.geo_country,
-                    "geo_city": session.geo_city,
-                    "geo_latitude": session.geo_latitude,
-                    "geo_longitude": session.geo_longitude,
                     "connected_at": session.connected_at.isoformat(),
                     "disconnected_at": session.disconnected_at.isoformat()
                     if session.disconnected_at
