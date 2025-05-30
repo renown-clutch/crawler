@@ -3,7 +3,6 @@ import functools
 from zoneinfo import ZoneInfo
 
 import peewee_async
-import peeweedbevolve
 import ujson as json
 from decouple import config
 from peewee import (
@@ -190,10 +189,6 @@ class ApiRequestLog(BaseModel):
 
     class Meta:
         table_name = "api_request_log"
-
-
-if config("EVOLVE", default=False, cast=bool):
-    peeweedbevolve.evolve(db, ignore_tables=["basemodel"], interactive=False)
 
 
 db.set_allow_sync(True)
