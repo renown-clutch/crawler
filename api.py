@@ -25,8 +25,10 @@ from clutch.db.models import (
     FaceitProfile,
     Match,
     Player,
+    SessionRequest,
     Stat,
     UserCrawlTask,
+    UserSession,
 )
 from clutch.middleware import RequestLoggingMiddleware
 
@@ -1424,6 +1426,187 @@ async def get_user_renown_stats(steam_id: int):
         "total_games": total_games,
         "leaderboard_position": leaderboard_position,
     }
+
+
+class SessionAnalyticsRequest(BaseModel):
+    admin_key: str
+    hours_back: Optional[int] = 24
+
+
+@app.post("/admin/session_analytics")
+async def get_session_analytics(request: SessionAnalyticsRequest):
+    """Get analytics about user sessions and requests."""
+    admin_key = config("ADMIN_API_KEY", default="")
+    if not admin_key or request.admin_key != admin_key:
+        return {"status": "error", "message": "Invalid admin key"}
+
+    try:
+        cutoff_time = datetime.now(timezone.utc) - timedelta(hours=request.hours_back)
+
+        # Session statistics
+        total_sessions = (
+            UserSession.select().where(UserSession.connected_at >= cutoff_time).count()
+        )
+
+        active_sessions = (
+            UserSession.select()
+            .where(
+                (UserSession.connected_at >= cutoff_time)
+                & (UserSession.is_active == True)
+            )
+            .count()
+        )
+
+        # Geographic distribution
+        geo_stats = {}
+        for session in UserSession.select().where(
+            UserSession.connected_at >= cutoff_time
+        ):
+            country = session.geo_country or "Unknown"
+            if country not in geo_stats:
+                geo_stats[country] = {"count": 0, "cities": set()}
+            geo_stats[country]["count"] += 1
+            if session.geo_city:
+                geo_stats[country]["cities"].add(session.geo_city)
+
+        # Convert sets to lists for JSON serialization
+        for country in geo_stats:
+            geo_stats[country]["cities"] = list(geo_stats[country]["cities"])
+
+        # Request statistics
+        total_requests = (
+            SessionRequest.select()
+            .where(SessionRequest.created_at >= cutoff_time)
+            .count()
+        )
+
+        # Request types breakdown
+        request_types = {}
+        for request in SessionRequest.select().where(
+            SessionRequest.created_at >= cutoff_time
+        ):
+            event_type = request.event_type
+            if event_type not in request_types:
+                request_types[event_type] = {
+                    "count": 0,
+                    "success_count": 0,
+                    "avg_processing_time": 0,
+                    "total_processing_time": 0,
+                }
+            request_types[event_type]["count"] += 1
+            if request.success:
+                request_types[event_type]["success_count"] += 1
+            if request.processing_time_ms:
+                request_types[event_type]["total_processing_time"] += (
+                    request.processing_time_ms
+                )
+
+        # Calculate averages
+        for event_type in request_types:
+            if request_types[event_type]["count"] > 0:
+                request_types[event_type]["avg_processing_time"] = round(
+                    request_types[event_type]["total_processing_time"]
+                    / request_types[event_type]["count"],
+                    2,
+                )
+                request_types[event_type]["success_rate"] = round(
+                    (
+                        request_types[event_type]["success_count"]
+                        / request_types[event_type]["count"]
+                    )
+                    * 100,
+                    2,
+                )
+
+        # Top users by request count
+        top_users = {}
+        for request in SessionRequest.select().where(
+            (SessionRequest.created_at >= cutoff_time)
+            & (SessionRequest.steam_id.is_null(False))
+        ):
+            steam_id = str(request.steam_id)
+            if steam_id not in top_users:
+                top_users[steam_id] = 0
+            top_users[steam_id] += 1
+
+        # Sort top users
+        top_users = dict(
+            sorted(top_users.items(), key=lambda x: x[1], reverse=True)[:10]
+        )
+
+        return {
+            "status": "success",
+            "analytics": {
+                "time_period_hours": request.hours_back,
+                "sessions": {
+                    "total": total_sessions,
+                    "active": active_sessions,
+                },
+                "requests": {
+                    "total": total_requests,
+                    "by_type": request_types,
+                },
+                "geography": geo_stats,
+                "top_users_by_requests": top_users,
+            },
+        }
+
+    except Exception as e:
+        logger.error(f"Error getting session analytics: {str(e)}")
+        return {"status": "error", "message": str(e)}
+
+
+@app.post("/admin/session_details")
+async def get_session_details(request: SessionAnalyticsRequest):
+    """Get detailed session information."""
+    admin_key = config("ADMIN_API_KEY", default="")
+    if not admin_key or request.admin_key != admin_key:
+        return {"status": "error", "message": "Invalid admin key"}
+
+    try:
+        cutoff_time = datetime.now(timezone.utc) - timedelta(hours=request.hours_back)
+
+        sessions = []
+        for session in (
+            UserSession.select()
+            .where(UserSession.connected_at >= cutoff_time)
+            .order_by(UserSession.connected_at.desc())
+            .limit(100)
+        ):
+            session_duration = None
+            if session.disconnected_at:
+                duration_seconds = (
+                    session.disconnected_at - session.connected_at
+                ).total_seconds()
+                session_duration = round(duration_seconds, 2)
+
+            sessions.append(
+                {
+                    "session_id": session.session_id,
+                    "steam_id": session.steam_id,
+                    "client_id": session.client_id,
+                    "ip_address": session.ip_address,
+                    "user_agent": session.user_agent,
+                    "geo_country": session.geo_country,
+                    "geo_city": session.geo_city,
+                    "geo_latitude": session.geo_latitude,
+                    "geo_longitude": session.geo_longitude,
+                    "connected_at": session.connected_at.isoformat(),
+                    "disconnected_at": session.disconnected_at.isoformat()
+                    if session.disconnected_at
+                    else None,
+                    "session_duration_seconds": session_duration,
+                    "is_active": session.is_active,
+                    "total_requests": session.total_requests,
+                    "connection_count": session.connection_count,
+                }
+            )
+
+        return {"status": "success", "sessions": sessions}
+
+    except Exception as e:
+        logger.error(f"Error getting session details: {str(e)}")
+        return {"status": "error", "message": str(e)}
 
 
 class ChatMessageRequest(BaseModel):

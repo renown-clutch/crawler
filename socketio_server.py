@@ -1,4 +1,6 @@
+import functools
 import logging
+import time
 from datetime import datetime, timezone
 from typing import Any, Dict
 
@@ -63,6 +65,7 @@ from api import (
     get_users_ranks as api_get_users_ranks,
 )
 from clutch.chat import chat_manager
+from clutch.session_tracker import session_tracker
 
 logging.basicConfig(level=logging.ERROR)
 logger = logging.getLogger(__name__)
@@ -76,10 +79,50 @@ sio = socketio.AsyncServer(
 client_info: Dict[str, Dict[str, Any]] = {}
 
 
+def track_request(event_type: str):
+    """Decorator to track SocketIO requests."""
+
+    def decorator(func):
+        @functools.wraps(func)
+        async def wrapper(sid, data=None):
+            start_time = time.time()
+            success = True
+            error_message = None
+
+            try:
+                result = await func(sid, data)
+                return result
+            except Exception as e:
+                success = False
+                error_message = str(e)
+                logger.error(f"Error in {event_type}: {str(e)}")
+                await sio.emit(
+                    "error", {"message": f"Error in {event_type}: {str(e)}"}, room=sid
+                )
+                raise
+            finally:
+                processing_time = int((time.time() - start_time) * 1000)
+                await session_tracker.log_request(
+                    session_id=sid,
+                    event_type=event_type,
+                    request_data=data,
+                    processing_time_ms=processing_time,
+                    success=success,
+                    error_message=error_message,
+                )
+
+        return wrapper
+
+    return decorator
+
+
 @sio.event
 async def connect(sid, environ, auth):
-    """Handle client connection"""
-    # Extract client_id and steam_id from auth data
+    """Handle client connection with session tracking startup if needed"""
+    # Start session tracker background worker if not already started
+    await session_tracker.start_background_worker()
+
+    # Rest of the connect logic...
     client_id = auth.get("client_id") if auth else None
     steam_id = auth.get("steam_id") if auth else None
 
@@ -88,7 +131,16 @@ async def connect(sid, environ, auth):
         await sio.disconnect(sid)
         return False
 
-    # Store client information
+    # Create session tracking
+    try:
+        session = await session_tracker.create_session(
+            session_id=sid, environ=environ, client_id=client_id, steam_id=steam_id
+        )
+        logger.info(f"Session tracking created for {sid}")
+    except Exception as e:
+        logger.error(f"Error creating session tracking: {e}")
+
+    # Store client information (keeping for backward compatibility)
     client_info[sid] = {
         "client_id": client_id,
         "steam_id": steam_id,
@@ -110,6 +162,13 @@ async def connect(sid, environ, auth):
 @sio.event
 async def disconnect(sid):
     """Handle client disconnection"""
+    # End session tracking
+    try:
+        await session_tracker.end_session(sid)
+        logger.info(f"Session tracking ended for {sid}")
+    except Exception as e:
+        logger.error(f"Error ending session tracking: {e}")
+
     if sid in client_info:
         client_data = client_info[sid]
         logger.info(f"Client {client_data['client_id']} disconnected (sid: {sid})")
@@ -117,12 +176,14 @@ async def disconnect(sid):
 
 
 @sio.event
+@track_request("ping")
 async def ping(sid, data=None):
     """Handle ping requests"""
     await sio.emit("pong", room=sid)
 
 
 @sio.event
+@track_request("send_chat_message")
 async def send_chat_message(sid, data):
     """Handle chat message sending"""
     try:
@@ -147,6 +208,7 @@ async def send_chat_message(sid, data):
 
 
 @sio.event
+@track_request("get_recent_messages")
 async def get_recent_messages(sid, data=None):
     """Handle getting recent chat messages"""
     try:
@@ -164,6 +226,7 @@ async def get_recent_messages(sid, data=None):
 
 
 @sio.event
+@track_request("get_user_faceit")
 async def get_user_faceit(sid, data):
     """Handle getting user faceit data"""
     try:
@@ -195,6 +258,7 @@ async def get_user_faceit(sid, data):
 
 
 @sio.event
+@track_request("get_user_faceit_elo")
 async def get_user_faceit_elo(sid, data):
     """Handle getting user faceit elo"""
     try:
@@ -222,6 +286,7 @@ async def get_user_faceit_elo(sid, data):
 
 
 @sio.event
+@track_request("get_user_faceit_url")
 async def get_user_faceit_url(sid, data):
     """Handle getting user faceit url"""
     try:
@@ -249,6 +314,7 @@ async def get_user_faceit_url(sid, data):
 
 
 @sio.event
+@track_request("get_user_faceit_elo_and_url")
 async def get_user_faceit_elo_and_url(sid, data):
     """Handle getting user faceit elo and url"""
     try:
@@ -282,6 +348,7 @@ async def get_user_faceit_elo_and_url(sid, data):
 
 
 @sio.event
+@track_request("get_user_bans")
 async def get_user_bans(sid, data):
     """Handle getting user bans"""
     try:
@@ -305,6 +372,7 @@ async def get_user_bans(sid, data):
 
 
 @sio.event
+@track_request("get_user_drops")
 async def get_user_drops(sid, data):
     """Handle getting user drops"""
     try:
@@ -328,6 +396,7 @@ async def get_user_drops(sid, data):
 
 
 @sio.event
+@track_request("get_users_ranks")
 async def get_users_ranks(sid, data):
     """Handle getting multiple users ranks"""
     try:
@@ -352,6 +421,7 @@ async def get_users_ranks(sid, data):
 
 
 @sio.event
+@track_request("get_users_faceit_elo_and_url")
 async def get_users_faceit_elo_and_url(sid, data):
     """Handle getting multiple users faceit elo and url"""
     try:
@@ -376,6 +446,7 @@ async def get_users_faceit_elo_and_url(sid, data):
 
 
 @sio.event
+@track_request("get_profile_data")
 async def get_profile_data(sid, data):
     """Handle getting user profile data"""
     try:
@@ -401,6 +472,7 @@ async def get_profile_data(sid, data):
 
 
 @sio.event
+@track_request("get_player_matchup")
 async def get_player_matchup(sid, data):
     """Handle getting player matchup data"""
     try:
@@ -434,6 +506,7 @@ async def get_player_matchup(sid, data):
 
 
 @sio.event
+@track_request("get_teams_map_stats")
 async def get_teams_map_stats(sid, data):
     """Handle getting teams map stats"""
     try:
@@ -470,6 +543,7 @@ async def get_teams_map_stats(sid, data):
 
 
 @sio.event
+@track_request("get_players_stats")
 async def get_players_stats(sid, data):
     """Handle getting players stats"""
     try:
@@ -494,6 +568,7 @@ async def get_players_stats(sid, data):
 
 
 @sio.event
+@track_request("get_user_last_matches")
 async def get_user_last_matches(sid, data):
     """Handle getting user last matches"""
     try:
@@ -520,6 +595,7 @@ async def get_user_last_matches(sid, data):
 
 
 @sio.event
+@track_request("get_live_matches")
 async def get_live_matches(sid, data=None):
     """Handle getting live matches"""
     try:
@@ -534,6 +610,7 @@ async def get_live_matches(sid, data=None):
 
 
 @sio.event
+@track_request("get_faceit_elo_by_names")
 async def get_faceit_elo_by_names(sid, data):
     """Handle getting faceit elo by player names"""
     try:
@@ -560,6 +637,7 @@ async def get_faceit_elo_by_names(sid, data):
 
 
 @sio.event
+@track_request("get_steam_ids_by_names")
 async def get_steam_ids_by_names(sid, data):
     """Handle getting steam IDs by player names"""
     try:
@@ -586,6 +664,7 @@ async def get_steam_ids_by_names(sid, data):
 
 
 @sio.event
+@track_request("get_user_renown_stats")
 async def get_user_renown_stats(sid, data):
     """Handle getting user renown stats"""
     try:
@@ -664,10 +743,51 @@ class SocketIOConnectionManager:
 # Set the connection manager immediately
 chat_manager.set_connection_manager(SocketIOConnectionManager())
 
+
+# Startup and shutdown handlers
+async def startup_tasks():
+    """Initialize background services"""
+    logger.info("Starting background services...")
+
+    # Start session tracker
+    await session_tracker.start_background_worker()
+
+    logger.info("Background services started")
+
+
+async def shutdown_tasks():
+    """Clean up background services"""
+    logger.info("Shutting down background services...")
+
+    # Shutdown session tracker
+    await session_tracker.shutdown()
+
+    # Cleanup geo service
+    from clutch.geo_service import cleanup_geo_service
+
+    await cleanup_geo_service()
+
+    logger.info("Background services shut down")
+
+
 # Create ASGI app after defining all events
 app = socketio.ASGIApp(sio)
 
+
 if __name__ == "__main__":
+    import asyncio
+
     import uvicorn
 
-    uvicorn.run(app, host="0.0.0.0", port=80)
+    # Start background tasks
+    async def main():
+        try:
+            await startup_tasks()
+            # Run the server
+            config = uvicorn.Config(app, host="0.0.0.0", port=80, log_level="info")
+            server = uvicorn.Server(config)
+            await server.serve()
+        finally:
+            await shutdown_tasks()
+
+    asyncio.run(main())

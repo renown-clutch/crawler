@@ -193,6 +193,63 @@ class ApiRequestLog(BaseModel):
         table_name = "api_request_log"
 
 
+class UserSession(BaseModel):
+    session_id = TextField(unique=True, index=True)  # SocketIO session ID
+    steam_id = BigIntegerField(
+        null=True, index=True
+    )  # Nullable for unauthenticated users
+    client_id = TextField(null=True, index=True)  # Client identifier
+    ip_address = TextField(null=False, index=True)
+    user_agent = TextField(null=True)
+
+    # Geo location data from IP
+    geo_country = TextField(null=True)
+    geo_country_code = TextField(null=True)
+    geo_region = TextField(null=True)
+    geo_city = TextField(null=True)
+    geo_latitude = FloatField(null=True)
+    geo_longitude = FloatField(null=True)
+    geo_timezone = TextField(null=True)
+    geo_isp = TextField(null=True)
+
+    # Session timing
+    connected_at = DateTimeTZField(default=now, index=True)
+    disconnected_at = DateTimeTZField(null=True, index=True)
+    last_activity_at = DateTimeTZField(default=now, index=True)
+    is_active = BooleanField(default=True, index=True)
+
+    # Session metadata
+    connection_count = IntegerField(
+        default=1
+    )  # Number of times this client_id connected
+    total_requests = IntegerField(default=0)
+
+    class Meta:
+        table_name = "user_session"
+
+
+class SessionRequest(BaseModel):
+    session = ForeignKeyField(UserSession, backref="requests", index=True)
+    event_type = TextField(null=False, index=True)  # SocketIO event name
+    request_data = BinaryJSONField(default=None, null=True)  # Request payload
+    response_data = BinaryJSONField(
+        default=None, null=True
+    )  # Response payload (if applicable)
+    processing_time_ms = IntegerField(null=True)  # Time taken to process request
+    created_at = DateTimeTZField(default=now, index=True)
+    success = BooleanField(default=True, index=True)
+    error_message = TextField(null=True)
+
+    # Additional metadata
+    steam_id = BigIntegerField(
+        null=True, index=True
+    )  # Denormalized for easier querying
+    ip_address = TextField(null=True, index=True)  # Denormalized for easier querying
+
+    class Meta:
+        table_name = "session_request"
+
+
 if config("EVOLVE", default=False, cast=bool):
     peeweedbevolve.evolve(db, ignore_tables=["basemodel"], interactive=False)
 
