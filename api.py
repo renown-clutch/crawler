@@ -655,12 +655,12 @@ async def get_players_stats(request: PlayerStatsRequest):
                     if won_match:
                         current_streak += 1
                     else:
-                        current_streak = 0
+                        current_streak = -1  # Start new loss streak
                 else:
                     if not won_match:
                         current_streak -= 1
                     else:
-                        current_streak = 0
+                        current_streak = 1  # Start new win streak
 
             if won_match:
                 wins += 1
