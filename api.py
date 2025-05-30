@@ -1379,3 +1379,15 @@ async def get_recent_messages(limit: int = 50):
     except Exception as e:
         logger.error(f"Error getting recent messages: {str(e)}")
         return {"status": "error", "message": str(e)}
+
+
+@app.get("/get_renown_user_count")
+@cache_manager.cached(ttl_seconds=300)  # Cache for 5 minutes
+async def get_renown_user_count():
+    """Get the total count of players in the system."""
+    try:
+        count = Player.select().count()
+        return {"status": "success", "count": count}
+    except Exception as e:
+        logger.error(f"Error getting player count: {str(e)}")
+        return {"status": "error", "message": str(e)}
