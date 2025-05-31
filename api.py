@@ -1397,15 +1397,19 @@ async def get_renown_user_count():
             Player.select()
             .join(Stat, on=(Player.id == Stat.player))
             .join(Match, on=(Stat.match == Match.id))
-            .where((Match.finished == True) & (fn.date(Match.finished_at) == today))
+            .where(
+                (Match.finished == True)
+                & (Match.status != "CANCELLED")
+                & (fn.date(Match.match_started_event_at) == today)
+            )
             .distinct()
             .count()
         )
 
         return {
             "status": "success",
-            "count": total_count,
-            "players_played_today": players_played_today,
+            "renown_user_count": total_count,
+            "active_users_today": players_played_today,
         }
     except Exception as e:
         logger.error(f"Error getting player count: {str(e)}")
