@@ -1,5 +1,6 @@
 import functools
 import logging
+import re
 import time
 from datetime import datetime, timezone
 from typing import Any, Dict
@@ -77,6 +78,65 @@ sio = socketio.AsyncServer(
 
 # Store client information
 client_info: Dict[str, Dict[str, Any]] = {}
+
+# Rate limiting for chat messages - store last message timestamp per session
+last_message_times: Dict[str, float] = {}
+
+# Redis command patterns to detect potential injection attacks
+REDIS_DANGEROUS_COMMANDS = [
+    r"\b(FLUSHDB|FLUSHALL|DEL|KEYS|CONFIG|EVAL|SCRIPT|SHUTDOWN|DEBUG|CLIENT|MONITOR|SLAVEOF|REPLICAOF)\b",
+    r"\b(AUTH|SAVE|BGSAVE|BGREWRITEAOF|LASTSAVE|DBSIZE|INFO|SLOWLOG)\b",
+    r"\b(MIGRATE|DUMP|RESTORE|OBJECT|RANDOMKEY|RENAME|RENAMENX|SORT|TTL|TYPE)\b",
+    r"\b(DISCARD|EXEC|MULTI|UNWATCH|WATCH)\b",
+    r"\b(PUBLISH|PUBSUB|PUNSUBSCRIBE|SUBSCRIBE|UNSUBSCRIBE)\b",
+]
+
+
+def validate_chat_message(sid: str, message: str) -> tuple[bool, str]:
+    """
+    Validate chat message for length, rate limiting, and Redis injection attempts.
+    Returns (is_valid, error_message)
+    """
+    # Check message length
+    if len(message) > 300:
+        return False, "Message too long. Maximum 300 characters allowed."
+
+    # Check rate limiting (2 seconds between messages)
+    current_time = time.time()
+    if sid in last_message_times:
+        time_since_last = current_time - last_message_times[sid]
+        if time_since_last < 2.0:
+            return (
+                False,
+                f"Please wait {2.0 - time_since_last:.1f} seconds before sending another message.",
+            )
+
+    # Check for potential Redis injection
+    message_upper = message.upper()
+    for pattern in REDIS_DANGEROUS_COMMANDS:
+        if re.search(pattern, message_upper, re.IGNORECASE):
+            logger.warning(f"Potential Redis injection attempt from {sid}: {message}")
+            return False, "Message contains prohibited content."
+
+    # Check for Redis-like syntax patterns
+    if re.search(r"^\s*[A-Z]+\s+", message.strip(), re.IGNORECASE):
+        # Additional check for command-like patterns
+        first_word = message.strip().split()[0].upper()
+        if first_word in [
+            "SET",
+            "GET",
+            "HSET",
+            "HGET",
+            "LPUSH",
+            "RPUSH",
+            "SADD",
+            "ZADD",
+            "INCR",
+            "DECR",
+        ]:
+            return False, "Message contains prohibited content."
+
+    return True, ""
 
 
 def track_request(event_type: str):
@@ -169,6 +229,10 @@ async def disconnect(sid):
     except Exception as e:
         logger.error(f"Error ending session tracking: {e}")
 
+    # Clean up rate limiting data
+    if sid in last_message_times:
+        del last_message_times[sid]
+
     if sid in client_info:
         client_data = client_info[sid]
         logger.info(f"Client {client_data['client_id']} disconnected (sid: {sid})")
@@ -195,6 +259,15 @@ async def send_chat_message(sid, data):
                 "error", {"message": "Username and message are required"}, room=sid
             )
             return
+
+        # Validate chat message
+        is_valid, error_message = validate_chat_message(sid, message)
+        if not is_valid:
+            await sio.emit("error", {"message": error_message}, room=sid)
+            return
+
+        # Update last message time for rate limiting
+        last_message_times[sid] = time.time()
 
         # Add message to chat manager - this will trigger the SocketIOConnectionManager
         # to broadcast the message to all clients (including the sender)
