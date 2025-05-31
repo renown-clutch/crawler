@@ -1327,9 +1327,18 @@ async def get_renown_stats():
             response = requests.get(url, cookies=cookies)
             response.raise_for_status()
             live_matches_data = response.json()
-            live_matches_count = (
-                len(live_matches_data) if isinstance(live_matches_data, list) else 0
-            )
+
+            # Extract the liveMatches array from the response
+            if (
+                isinstance(live_matches_data, dict)
+                and "liveMatches" in live_matches_data
+            ):
+                live_matches_list = live_matches_data["liveMatches"]
+                live_matches_count = (
+                    len(live_matches_list) if isinstance(live_matches_list, list) else 0
+                )
+            else:
+                live_matches_count = 0
         except Exception as e:
             logger.error(f"Error fetching live matches count: {str(e)}")
             live_matches_count = 0
