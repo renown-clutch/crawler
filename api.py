@@ -1319,6 +1319,13 @@ async def get_renown_stats():
             .count()
         )
 
+        # Count matches created today (non-cancelled)
+        matches_today = (
+            Match.select()
+            .where((Match.status != "CANCELLED") & (fn.date(Match.created_at) == today))
+            .count()
+        )
+
         # Get live matches count
         live_matches_count = 0
         try:
@@ -1348,6 +1355,7 @@ async def get_renown_stats():
             "renown_total_user_count": total_count,
             "active_users_today": players_played_today,
             "renown_active_user_count": players_with_matches,
+            "matches_today": matches_today,
             "live_matches_count": live_matches_count,
         }
     except Exception as e:
