@@ -2,7 +2,7 @@ import asyncio
 import hashlib
 import json
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from functools import lru_cache
 from typing import Any, Dict, List, Optional
 
@@ -1382,12 +1382,31 @@ async def get_recent_messages(limit: int = 50):
 
 
 @app.get("/get_renown_user_count")
-@cache_manager.cached(ttl_seconds=300)  # Cache for 5 minutes
+@cache_manager.cached(ttl_seconds=60)  # Cache for 1 minute
 async def get_renown_user_count():
-    """Get the total count of players in the system."""
+    """Get the total count of players in the system and players who played today."""
     try:
-        count = Player.select().count()
-        return {"status": "success", "count": count}
+        # Get total player count
+        total_count = Player.select().count()
+
+        # Get today's date
+        today = date.today()
+
+        # Count distinct players who played in matches that finished today
+        players_played_today = (
+            Player.select()
+            .join(Stat, on=(Player.id == Stat.player))
+            .join(Match, on=(Stat.match == Match.id))
+            .where((Match.finished == True) & (fn.date(Match.finished_at) == today))
+            .distinct()
+            .count()
+        )
+
+        return {
+            "status": "success",
+            "count": total_count,
+            "players_played_today": players_played_today,
+        }
     except Exception as e:
         logger.error(f"Error getting player count: {str(e)}")
         return {"status": "error", "message": str(e)}
