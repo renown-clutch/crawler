@@ -1406,10 +1406,21 @@ async def get_renown_user_count():
             .count()
         )
 
+        # Count distinct players who have played in at least 1 non-cancelled match
+        players_with_matches = (
+            Player.select()
+            .join(Stat, on=(Player.id == Stat.player))
+            .join(Match, on=(Stat.match == Match.id))
+            .where(Match.status != "CANCELLED")
+            .distinct()
+            .count()
+        )
+
         return {
             "status": "success",
-            "renown_user_count": total_count,
+            "renown_total_user_count": total_count,
             "active_users_today": players_played_today,
+            "renown_active_user_count": players_with_matches,
         }
     except Exception as e:
         logger.error(f"Error getting player count: {str(e)}")
