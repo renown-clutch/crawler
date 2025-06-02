@@ -390,7 +390,7 @@ async def get_profile_data(steam_id: int):
         else:
             highest_elo = max(highest_elo, before_elo, after_elo)
 
-    return {"highest_elo": highest_elo}
+    return {"highest_elo": highest_elo if highest_elo is not None else player.elo}
 
 
 @app.get("/get_player_matchup")
