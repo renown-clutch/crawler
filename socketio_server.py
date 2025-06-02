@@ -191,6 +191,11 @@ async def connect(sid, environ, auth):
         await sio.disconnect(sid)
         return False
 
+    # if not steam_id:
+    #     logger.warning(f"Client {sid} connected without steam_id")
+    #     await sio.disconnect(sid)
+    #     return False
+
     # Create session tracking
     try:
         session = await session_tracker.create_session(
@@ -210,11 +215,10 @@ async def connect(sid, environ, auth):
     logger.info(f"Client {client_id} connected with sid {sid}, steam_id: {steam_id}")
 
     # Join room based on client_id for targeted messaging
-    await sio.enter_room(sid, f"client_{client_id}")
+    # await sio.enter_room(sid, f"client_{client_id}")
 
-    # If steam_id is provided, also join steam_id room
-    if steam_id:
-        await sio.enter_room(sid, f"steam_{steam_id}")
+    # Always join steam_id room since steam_id is now mandatory
+    await sio.enter_room(sid, f"steam_{steam_id}")
 
     return True
 

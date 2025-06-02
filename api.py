@@ -103,7 +103,9 @@ async def startup_event():
 @app.get("/get_user_faceit")
 @cache_manager.cached(ttl_seconds=300)  # Cache for 5 minutes
 async def get_user_faceit(steam_id: int):
-    player = Player.select().where(Player.steam_id == steam_id).first()
+    # Ensure user is in crawl queue if not in database
+    player = await ensure_user_in_crawl_queue(steam_id)
+
     if player is None:
         logger.info("User doesnt exist in db, falling back to no caching")
         data = get_faceit_profile(steam_id)
@@ -170,7 +172,8 @@ async def get_user_faceit_elo_and_url(steam_id: int):
 @cache_manager.cached(ttl_seconds=600)  # Cache for 10 minutes
 async def get_user_bans(steam_id: int):
     logger.info(f"Getting bans for user {steam_id}")
-    player = Player.select().where(Player.steam_id == steam_id).first()
+    # Ensure user is in crawl queue if not in database
+    player = await ensure_user_in_crawl_queue(steam_id)
 
     if player is None:
         logger.info(f"No player found with steam_id {steam_id}")
@@ -203,7 +206,9 @@ async def get_user_bans(steam_id: int):
 @cache_manager.cached(ttl_seconds=600)  # Cache for 10 minutes
 async def get_user_drops(steam_id: int):
     logger.info(f"Getting drops for user {steam_id}")
-    player = Player.select().where(Player.steam_id == steam_id).first()
+    # Ensure user is in crawl queue if not in database
+    player = await ensure_user_in_crawl_queue(steam_id)
+
     if player is None:
         logger.info(f"No player found with steam_id {steam_id}")
         return {"drops": []}
@@ -363,7 +368,8 @@ async def get_users_faceit_elo_and_url(request: RankRequest):
 @cache_manager.cached(ttl_seconds=600)  # Cache for 10 minutes
 async def get_profile_data(steam_id: int):
     logger.info(f"Getting profile data for user {steam_id}")
-    player = Player.select().where(Player.steam_id == steam_id).first()
+    # Ensure user is in crawl queue if not in database
+    player = await ensure_user_in_crawl_queue(steam_id)
 
     if player is None:
         logger.info(f"No player found with steam_id {steam_id}")
@@ -394,9 +400,9 @@ async def get_player_matchup(player1_steam_id: int, player2_steam_id: int):
         f"Getting matchup data for players {player1_steam_id} and {player2_steam_id}"
     )
 
-    # Get both players
-    player1 = Player.select().where(Player.steam_id == player1_steam_id).first()
-    player2 = Player.select().where(Player.steam_id == player2_steam_id).first()
+    # Ensure both users are in crawl queue if not in database
+    player1 = await ensure_user_in_crawl_queue(player1_steam_id)
+    player2 = await ensure_user_in_crawl_queue(player2_steam_id)
 
     if not player1 or not player2:
         return {"error": "One or both players not found"}
@@ -545,7 +551,9 @@ async def get_team_map_stats(steam_ids: list[int]):
     map_counts = {}
 
     async def process_player(steam_id: int):
-        player = Player.select().where(Player.steam_id == steam_id).first()
+        # Ensure user is in crawl queue if not in database
+        player = await ensure_user_in_crawl_queue(steam_id)
+
         if player is None:
             logger.info(f"No player found with steam_id {steam_id}")
             return {}
@@ -594,7 +602,8 @@ async def get_players_stats(request: PlayerStatsRequest):
     results = {}
 
     async def process_player(steam_id: int):
-        player = Player.select().where(Player.steam_id == steam_id).first()
+        # Ensure user is in crawl queue if not in database
+        player = await ensure_user_in_crawl_queue(steam_id)
 
         if player is None:
             return steam_id, None
@@ -724,7 +733,8 @@ async def get_players_stats(request: PlayerStatsRequest):
 async def get_user_last_matches(steam_id: int, limit: int = 3):
     logger.info(f"Getting last {limit} matches for user {steam_id}")
 
-    player = Player.select().where(Player.steam_id == steam_id).first()
+    # Ensure user is in crawl queue if not in database
+    player = await ensure_user_in_crawl_queue(steam_id)
 
     if player is None:
         logger.info(f"No player found with steam_id {steam_id}")
@@ -1362,7 +1372,8 @@ async def get_connections(admin_key: str = Query(...)):
 @cache_manager.cached(ttl_seconds=300)
 async def get_user_renown_stats(steam_id: int):
     logger.info(f"Getting Renown stats for user {steam_id}")
-    player = Player.select().where(Player.steam_id == steam_id).first()
+    # Ensure user is in crawl queue if not in database
+    player = await ensure_user_in_crawl_queue(steam_id)
 
     if player is None:
         logger.info(f"No player found with steam_id {steam_id}")
@@ -1613,6 +1624,35 @@ async def get_recent_messages(limit: int = 50):
     except Exception as e:
         logger.error(f"Error getting recent messages: {str(e)}")
         return {"status": "error", "message": str(e)}
+
+
+async def ensure_user_in_crawl_queue(steam_id: int) -> Optional[Player]:
+    """
+    Check if a player exists in the database. If not, create a UserCrawlTask.
+    Returns the Player object if it exists, None otherwise.
+    """
+    try:
+        player = Player.select().where(Player.steam_id == steam_id).first()
+
+        if player is None:
+            logger.info(f"Player {steam_id} not found, adding to crawl queue")
+            # Create user crawl task for missing player
+            task, created = UserCrawlTask.get_or_create(
+                steam_id=steam_id,
+                defaults={
+                    "page_html": "",
+                    "processed": False,
+                },
+            )
+            if created:
+                logger.info(f"Created user crawl task for player {steam_id}")
+            else:
+                logger.info(f"User crawl task for player {steam_id} already exists")
+
+        return player
+    except Exception as e:
+        logger.error(f"Error checking/creating crawl task for {steam_id}: {str(e)}")
+        return None
 
 
 if __name__ == "__main__":
