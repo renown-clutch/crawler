@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 from datetime import datetime, timedelta
 
@@ -11,6 +12,7 @@ from .browser_tools import check_renown_login, cleanup_browser, setup_browser
 from .crawl_banlist import process_new_bans
 from .crawl_matches import combined_match_crawler_job, crawl_new_matches
 from .crawl_users import user_crawl_job
+from .db.models import Player, UserCrawlTask
 from .telegram_utils import send_alert
 
 logging.basicConfig(level=logging.INFO)
@@ -242,7 +244,7 @@ scheduler.add_job(
 scheduler.add_job(
     user_crawl_wrapper,
     trigger="interval",
-    minutes=5,  # Run every 5 minutes
+    minutes=1,
     id="user_crawl",
     name="Crawl user profiles",
     replace_existing=True,
@@ -253,10 +255,90 @@ scheduler.add_job(
 )
 
 
+async def execute_oneshot_usercrawl():
+    """Execute the oneshot usercrawl functionality to create missing UserCrawlTask entries."""
+    logger.info("Executing oneshot usercrawl at scheduler startup")
+
+    try:
+        # Load the renown users JSON file
+        try:
+            with open("renown_users.json", "r") as f:
+                renown_users = json.load(f)
+            logger.info(f"Loaded {len(renown_users)} users from renown_users.json")
+        except FileNotFoundError:
+            logger.warning(
+                "renown_users.json file not found, skipping oneshot usercrawl"
+            )
+            return
+        except json.JSONDecodeError as e:
+            logger.error(f"Error parsing JSON file: {e}")
+            return
+
+        # Get all existing steam_ids from Player table for efficient lookup
+        existing_player_steam_ids = set(
+            player.steam_id for player in Player.select(Player.steam_id)
+        )
+        logger.info(
+            f"Found {len(existing_player_steam_ids)} existing players in database"
+        )
+
+        # Get all existing steam_ids from UserCrawlTask table to avoid duplicates
+        existing_crawl_task_steam_ids = set(
+            task.steam_id for task in UserCrawlTask.select(UserCrawlTask.steam_id)
+        )
+        logger.info(
+            f"Found {len(existing_crawl_task_steam_ids)} existing crawl tasks in database"
+        )
+
+        created_count = 0
+        skipped_count = 0
+
+        for user in renown_users:
+            steam_id = int(user["steam_id"])
+
+            # Check if steam_id already exists in Player table
+            if steam_id in existing_player_steam_ids:
+                skipped_count += 1
+                continue
+
+            # Check if we already have a crawl task for this steam_id
+            if steam_id in existing_crawl_task_steam_ids:
+                skipped_count += 1
+                continue
+
+            # Create UserCrawlTask for this steam_id
+            try:
+                UserCrawlTask.create(
+                    steam_id=steam_id,
+                    page_html="",  # Empty HTML since this is just queued for crawling
+                    processed=False,
+                )
+                created_count += 1
+                logger.info(
+                    f"Created UserCrawlTask for steam_id: {steam_id} (nickname: {user.get('nickname', 'Unknown')})"
+                )
+
+            except Exception as e:
+                logger.error(
+                    f"Error creating UserCrawlTask for steam_id {steam_id}: {e}"
+                )
+
+        logger.info(
+            f"Oneshot usercrawl completed. Created {created_count} new UserCrawlTask entries, skipped {skipped_count} existing entries"
+        )
+
+    except Exception as e:
+        logger.error(f"Error in oneshot usercrawl: {str(e)}")
+        await send_alert(f"Error in oneshot usercrawl: {str(e)}")
+
+
 async def start_scheduler():
     """Start the scheduler."""
     scheduler.start()
     logger.info("Scheduler started")
+
+    # Execute oneshot usercrawl at startup
+    await execute_oneshot_usercrawl()
 
     try:
         while True:
