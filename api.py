@@ -803,8 +803,6 @@ class CacheStatisticsRequest(BaseModel):
     admin_key: str
 
 
-
-
 class ConnectionManager:
     def __init__(self):
         self.active_connections: Dict[str, List[WebSocket]] = {}
@@ -1262,7 +1260,76 @@ async def get_renown_stats():
         return {"status": "error", "message": str(e)}
 
 
+@app.get("/get_user_renown_stats")
+@cache_manager.cached(ttl_seconds=300)
+async def get_user_renown_stats(steam_id: int):
+    logger.info(f"Getting Renown stats for user {steam_id}")
+    player = Player.get_or_none(Player.steam_id == steam_id)
+
+    if player is None:
+        logger.info(f"No player found with steam_id {steam_id}")
+        return {
+            "current_elo": None,
+            "highest_elo": None,
+            "kd": None,
+            "winrate": None,
+            "total_games": 0,
+            "leaderboard_position": None,
+        }
+
+    current_elo = player.elo
+
+    leaderboard_position = (
+        Player.select().where((Player.elo > current_elo)).count()
+    ) + 1
+
+    player_stats = (
+        Stat.select()
+        .join(Match)
+        .where((Stat.player == player) & (Match.status != "CANCELLED"))
+    )
+
+    # Initialize variables
+    highest_elo = current_elo
+    total_kills = 0
+    total_deaths = 0
+    total_games = 0
+    wins = 0
+
+    # Calculate stats from match history
+    for stat in player_stats:
+        # Update highest ELO
+        before_elo = stat.elo_before_match
+        after_elo = stat.elo_before_match + stat.elo_change
+        highest_elo = max(highest_elo, before_elo, after_elo)
+
+        # Update K/D stats
+        total_kills += stat.kills
+        total_deaths += stat.deaths
+
+        # Update win count
+        match = stat.match
+        if match.winner == "team1" and stat.team == "team1":
+            wins += 1
+        elif match.winner == "team2" and stat.team == "team2":
+            wins += 1
+
+        total_games += 1
+
+    # Calculate final statistics
+    kd = round(total_kills / total_deaths, 2) if total_deaths > 0 else total_kills
+    winrate = round((wins / total_games * 100), 2) if total_games > 0 else 0
+
+    return {
+        "current_elo": current_elo,
+        "highest_elo": highest_elo,
+        "kd": kd,
+        "winrate": winrate,
+        "total_games": total_games,
+        "leaderboard_position": leaderboard_position,
+    }
+
+
 class ChatMessageRequest(BaseModel):
     username: str
     message: str
-
