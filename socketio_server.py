@@ -1,3 +1,4 @@
+import asyncio
 import functools
 import logging
 import re
@@ -66,7 +67,9 @@ from api import (
     get_users_ranks as api_get_users_ranks,
 )
 from clutch.chat import chat_manager
+from clutch.db.models import Player, UserSession
 from clutch.session_tracker import session_tracker
+from clutch.telegram_utils import send_alert
 
 logging.basicConfig(level=logging.ERROR)
 logger = logging.getLogger(__name__)
@@ -139,6 +142,69 @@ def validate_chat_message(sid: str, message: str) -> tuple[bool, str]:
     return True, ""
 
 
+async def check_and_notify_new_user(steam_id: int) -> None:
+    """
+    Check if this Steam ID has 1 or fewer sessions (first time connecting) and send a Telegram notification if so.
+    This runs asynchronously and doesn't block the connection.
+    """
+    logger.info(f"Starting check_and_notify_new_user for steam_id: {steam_id}")
+    try:
+        # Count how many sessions this Steam ID has had
+        session_count = (
+            UserSession.select().where(UserSession.steam_id == steam_id).count()
+        )
+
+        if session_count > 1:
+            # User has connected before, no notification needed
+            logger.info(
+                f"Steam ID {steam_id} has {session_count} sessions, skipping notification"
+            )
+            return
+
+        logger.info(
+            f"New Steam ID detected (first session): {steam_id}, gathering info for Telegram notification"
+        )
+
+        # This is a first-time session user, gather their information
+        try:
+            # Get user's Renown stats (includes name and current elo)
+            renown_stats = await api_get_user_renown_stats(steam_id)
+            current_elo = renown_stats.get("current_elo", "Unknown")
+
+            # Construct Renown profile URL
+            renown_url = f"https://renown.gg/profile/{steam_id}"
+
+            # Try to get the user's name from the Player table
+            player = Player.select().where(Player.steam_id == steam_id).first()
+            player_name = player.name if player else "Unknown"
+
+            # Format the notification message
+            message = f"""🆕 New Extension User Connected!
+            
+👤 Name: {player_name}
+🆔 Steam ID: {steam_id}
+🎮 Renown ELO: {current_elo}
+🔗 Renown URL: {renown_url}"""
+
+            # Send the Telegram notification
+            await send_alert(message)
+            logger.info(
+                f"Sent Telegram notification for first-time session user: {steam_id}"
+            )
+
+        except Exception as e:
+            logger.error(
+                f"Error gathering info for new session user {steam_id}: {str(e)}"
+            )
+            # Send basic notification even if we can't get full details
+            await send_alert(
+                f"🆕 New Extension User Connected!\n🆔 Steam ID: {steam_id}\n❌ Could not fetch additional details"
+            )
+
+    except Exception as e:
+        logger.error(f"Error in check_and_notify_new_user for {steam_id}: {str(e)}")
+
+
 def track_request(event_type: str):
     """Decorator to track SocketIO requests."""
 
@@ -195,6 +261,15 @@ async def connect(sid, environ, auth):
     #     logger.warning(f"Client {sid} connected without steam_id")
     #     await sio.disconnect(sid)
     #     return False
+
+    # Check for new users BEFORE creating the session (non-blocking)
+    if steam_id:
+        # Create a background task to check and notify about new users
+        # This won't block the connection process
+        logger.info(f"Creating background task to check for new user: {steam_id}")
+        asyncio.create_task(check_and_notify_new_user(steam_id))
+    else:
+        logger.info("No steam_id provided, skipping new user check")
 
     # Create session tracking
     try:
