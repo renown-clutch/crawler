@@ -799,61 +799,10 @@ class CacheInvalidationRequest(BaseModel):
     admin_key: str
 
 
-@app.post("/admin/invalidate_cache")
-async def invalidate_cache(request: CacheInvalidationRequest):
-    """
-    Manually invalidate cache entries matching a pattern.
-    Requires admin key for security.
-    """
-    admin_key = config("ADMIN_API_KEY", default="")
-    if not admin_key or request.admin_key != admin_key:
-        return {"status": "error", "message": "Invalid admin key"}
-
-    try:
-        invalidated = cache_manager.invalidate_pattern(request.pattern)
-        return {
-            "status": "success",
-            "message": f"Cache invalidated for pattern: {request.pattern}",
-            "invalidated_keys_count": invalidated,
-        }
-    except Exception as e:
-        logger.error(f"Error invalidating cache: {str(e)}")
-        return {"status": "error", "message": str(e)}
-
-
 class CacheStatisticsRequest(BaseModel):
     admin_key: str
 
 
-@app.post("/admin/cache_statistics")
-async def get_cache_statistics(request: CacheStatisticsRequest):
-    """
-    Get statistics about the current cache usage.
-    Requires admin key for security.
-    """
-    admin_key = config("ADMIN_API_KEY", default="")
-    if not admin_key or request.admin_key != admin_key:
-        return {"status": "error", "message": "Invalid admin key"}
-
-    try:
-        # This assumes cache_manager has a method to get statistics
-        # Implement this method in the cache manager if it doesn't exist
-        stats = (
-            cache_manager.get_statistics()
-            if hasattr(cache_manager, "get_statistics")
-            else {}
-        )
-
-        # Return the basic cache counts from our invalidator
-        from clutch.cache_invalidator import last_counts
-
-        return {"status": "success", "cache_stats": stats, "db_counts": last_counts}
-    except Exception as e:
-        logger.error(f"Error getting cache statistics: {str(e)}")
-        return {"status": "error", "message": str(e)}
-
-
-# WebSocket Implementation
 
 
 class ConnectionManager:
@@ -1234,56 +1183,6 @@ async def websocket_endpoint(
         await manager.disconnect(websocket)
 
 
-@app.post("/admin/broadcast")
-async def broadcast_to_clients(
-    message: dict,
-    client_id: Optional[str] = None,
-    steam_id: Optional[int] = None,
-    admin_key: str = Query(...),
-):
-    """
-    Broadcast a message to connected WebSocket clients.
-    Can target specific clients by client_id or steam_id, or broadcast to all.
-    Requires admin key for security.
-    """
-    admin_key_expected = config("ADMIN_API_KEY", default="")
-    if not admin_key_expected or admin_key != admin_key_expected:
-        return {"status": "error", "message": "Invalid admin key"}
-
-    try:
-        if client_id:
-            await manager.broadcast_to_client(message, client_id)
-            return {
-                "status": "success",
-                "message": f"Broadcasted to client {client_id}",
-            }
-        elif steam_id:
-            await manager.broadcast_to_steam_id(message, steam_id)
-            return {
-                "status": "success",
-                "message": f"Broadcasted to steam_id {steam_id}",
-            }
-        else:
-            await manager.broadcast(message)
-            return {"status": "success", "message": "Broadcasted to all clients"}
-    except Exception as e:
-        logger.error(f"Error broadcasting message: {str(e)}")
-        return {"status": "error", "message": str(e)}
-
-
-@app.get("/admin/connections")
-async def get_connections(admin_key: str = Query(...)):
-    """
-    Get information about current WebSocket connections.
-    Requires admin key for security.
-    """
-    admin_key_expected = config("ADMIN_API_KEY", default="")
-    if not admin_key_expected or admin_key != admin_key_expected:
-        return {"status": "error", "message": "Invalid admin key"}
-
-    return {"status": "success", "connections": manager.get_connected_clients_count()}
-
-
 @app.get("/get_renown_stats")
 @cache_manager.cached(ttl_seconds=60)  # Cache for 1 minute
 async def get_renown_stats():
@@ -1367,24 +1266,3 @@ class ChatMessageRequest(BaseModel):
     username: str
     message: str
 
-
-@app.post("/send_chat_message")
-async def send_chat_message(request: ChatMessageRequest):
-    """Send a chat message."""
-    try:
-        message_data = await chat_manager.add_message(request.username, request.message)
-        return {"status": "success", "data": message_data}
-    except Exception as e:
-        logger.error(f"Error sending chat message: {str(e)}")
-        return {"status": "error", "message": str(e)}
-
-
-@app.get("/get_recent_messages")
-async def get_recent_messages(limit: int = 50):
-    """Get recent chat messages."""
-    try:
-        messages = await chat_manager.get_recent_messages(limit)
-        return {"status": "success", "data": messages}
-    except Exception as e:
-        logger.error(f"Error getting recent messages: {str(e)}")
-        return {"status": "error", "message": str(e)}
