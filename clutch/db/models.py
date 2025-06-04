@@ -42,7 +42,7 @@ class BaseModel(Model):
 
 class Player(BaseModel):
     steam_id = BigIntegerField(unique=True, index=True)
-    name = TextField(null=False, unique=True)
+    name = TextField(null=False, unique=True, index=True)
     elo = IntegerField(default=-1, index=True)
     country = TextField(null=True)
     registered_since = DateTimeTZField(null=True)
@@ -52,6 +52,10 @@ class Player(BaseModel):
 
     class Meta:
         table_name = "player"
+        indexes = (
+            (("steam_id", "elo"), False),
+            (("name", "elo"), False),
+        )
 
 
 class Match(BaseModel):
@@ -66,8 +70,8 @@ class Match(BaseModel):
     team2_captain = ForeignKeyField(
         Player, backref="captained_matches_team2", null=True
     )
-    created_at = DateTimeTZField(null=False)
-    status = TextField(null=False)
+    created_at = DateTimeTZField(null=False, index=True)
+    status = TextField(null=False, index=True)
     cancel_reason = TextField(null=True)
     finished = BooleanField(default=False)
     finished_at = DateTimeTZField(null=True)
@@ -81,6 +85,12 @@ class Match(BaseModel):
 
     class Meta:
         table_name = "match"
+        indexes = (
+            (("status", "created_at"), False),
+            (("status", "finished"), False),
+            (("map", "status"), False),
+            (("created_at", "status"), False),
+        )
 
 
 class Stat(BaseModel):
@@ -110,6 +120,12 @@ class Stat(BaseModel):
 
     class Meta:
         table_name = "stat"
+        indexes = (
+            (("player", "match"), False),
+            (("match", "player"), False),
+            (("player", "kills"), False),
+            (("player", "leetify_rating"), False),
+        )
 
 
 class Drop(BaseModel):
@@ -128,6 +144,10 @@ class Drop(BaseModel):
 
     class Meta:
         table_name = "drop"
+        indexes = (
+            (("player", "steam_market_price"), False),
+            (("player", "skin_name"), False),
+        )
 
 
 class MatchCrawlTask(BaseModel):
@@ -165,6 +185,10 @@ class Ban(BaseModel):
 
     class Meta:
         table_name = "ban"
+        indexes = (
+            (("player", "issued_on"), False),
+            (("player", "permanent"), False),
+        )
 
 
 class FaceitProfile(BaseModel):
@@ -176,6 +200,10 @@ class FaceitProfile(BaseModel):
 
     class Meta:
         table_name = "faceit_profile"
+        indexes = (
+            (("player", "last_updated_at"), False),
+            (("faceit_elo", "last_updated_at"), False),
+        )
 
 
 class ApiRequestLog(BaseModel):
@@ -194,50 +222,56 @@ class ApiRequestLog(BaseModel):
 
 
 class UserSession(BaseModel):
-    session_id = TextField(unique=True, index=True)  # SocketIO session ID
-    steam_id = BigIntegerField(
-        null=True, index=True
-    )  # Nullable for unauthenticated users
-    client_id = TextField(null=True, index=True)  # Client identifier
+    session_id = TextField(unique=True, index=True)
+    steam_id = BigIntegerField(null=True, index=True)
+    client_id = TextField(null=True, index=True)
     ip_address = TextField(null=False, index=True)
     user_agent = TextField(null=True)
 
-    # Session timing
     connected_at = DateTimeTZField(default=now, index=True)
     disconnected_at = DateTimeTZField(null=True, index=True)
     last_activity_at = DateTimeTZField(default=now, index=True)
     is_active = BooleanField(default=True, index=True)
 
-    # Session metadata
-    connection_count = IntegerField(
-        default=1
-    )  # Number of times this client_id connected
+    connection_count = IntegerField(default=1)
     total_requests = IntegerField(default=0)
 
     class Meta:
         table_name = "user_session"
+        indexes = (
+            (("steam_id", "is_active"), False),
+            (("connected_at", "is_active"), False),
+            (("steam_id", "connected_at"), False),
+            (("is_active", "connected_at"), False),
+            (("client_id", "is_active"), False),
+            (("connected_at", "steam_id", "is_active"), False),
+        )
 
 
 class SessionRequest(BaseModel):
     session = ForeignKeyField(UserSession, backref="requests", index=True)
-    event_type = TextField(null=False, index=True)  # SocketIO event name
-    request_data = BinaryJSONField(default=None, null=True)  # Request payload
-    response_data = BinaryJSONField(
-        default=None, null=True
-    )  # Response payload (if applicable)
-    processing_time_ms = IntegerField(null=True)  # Time taken to process request
+    event_type = TextField(null=False, index=True)
+    request_data = BinaryJSONField(default=None, null=True)
+    response_data = BinaryJSONField(default=None, null=True)
+    processing_time_ms = IntegerField(null=True)
     created_at = DateTimeTZField(default=now, index=True)
     success = BooleanField(default=True, index=True)
     error_message = TextField(null=True)
 
-    # Additional metadata
-    steam_id = BigIntegerField(
-        null=True, index=True
-    )  # Denormalized for easier querying
-    ip_address = TextField(null=True, index=True)  # Denormalized for easier querying
+    steam_id = BigIntegerField(null=True, index=True)
+    ip_address = TextField(null=True, index=True)
 
     class Meta:
         table_name = "session_request"
+        indexes = (
+            (("created_at", "steam_id"), False),
+            (("event_type", "created_at"), False),
+            (("success", "created_at"), False),
+            (("session", "created_at"), False),
+            (("event_type", "success"), False),
+            (("created_at", "processing_time_ms"), False),
+            (("steam_id", "event_type", "created_at"), False),
+        )
 
 
 if config("EVOLVE", default=False, cast=bool):
