@@ -10,6 +10,7 @@ import socketio
 
 # Import all the API functions we need to reuse
 from api import (
+    MatchIdsRequest,
     PlayerNamesRequest,
     PlayerStatsRequest,
     RankRequest,
@@ -20,6 +21,9 @@ from api import (
 )
 from api import (
     get_live_matches as api_get_live_matches,
+)
+from api import (
+    get_matches_with_banned_players as api_get_matches_with_banned_players,
 )
 from api import (
     get_player_matchup as api_get_player_matchup,
@@ -838,6 +842,33 @@ async def get_user_renown_stats(sid, data):
         logger.error(f"Error getting user renown stats: {str(e)}")
         await sio.emit(
             "error", {"message": f"Error getting user renown stats: {str(e)}"}, room=sid
+        )
+
+
+@sio.event
+@track_request("get_matches_with_banned_players")
+async def get_matches_with_banned_players(sid, data):
+    """Handle getting matches with banned players"""
+    try:
+        if data is None:
+            await sio.emit("error", {"message": "match_ids is required"}, room=sid)
+            return
+
+        match_ids = data.get("match_ids")
+        if not match_ids:
+            await sio.emit("error", {"message": "match_ids is required"}, room=sid)
+            return
+
+        match_ids_request = MatchIdsRequest(match_ids=match_ids)
+        result = await api_get_matches_with_banned_players(match_ids_request)
+        await sio.emit("matches_with_banned_players", {"data": result}, room=sid)
+
+    except Exception as e:
+        logger.error(f"Error getting matches with banned players: {str(e)}")
+        await sio.emit(
+            "error",
+            {"message": f"Error getting matches with banned players: {str(e)}"},
+            room=sid,
         )
 
 

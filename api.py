@@ -1655,6 +1655,71 @@ async def ensure_user_in_crawl_queue(steam_id: int) -> Optional[Player]:
         return None
 
 
+class MatchIdsRequest(BaseModel):
+    match_ids: list[int]
+
+
+@app.post("/get_matches_with_banned_players")
+@cache_manager.cached(ttl_seconds=600)  # Cache for 10 minutes
+async def get_matches_with_banned_players(request: MatchIdsRequest):
+    """
+    Get match IDs that have at least one player with an active or permanent cheating ban.
+    """
+    logger.info(f"Checking for banned players in matches: {request.match_ids}")
+
+    if not request.match_ids:
+        return {"matches_with_banned_players": []}
+
+    current_time = datetime.now(timezone.utc)
+    matches_with_banned_players = []
+
+    try:
+        # For each match, check if any player has a cheating ban
+        for match_id in request.match_ids:
+            # Get all players in this match
+            players_in_match = (
+                Player.select()
+                .join(Stat, on=(Player.id == Stat.player))
+                .join(Match, on=(Stat.match == Match.id))
+                .where(Match.id == match_id)
+                .distinct()
+            )
+
+            # Check if any player in the match has an active cheating ban
+            has_banned_player = False
+            for player in players_in_match:
+                # Look for cheating bans for this player
+                cheating_bans = Ban.select().where(
+                    (Ban.player == player) & (Ban.category.in_(["Cheating"]))
+                )
+
+                for ban in cheating_bans:
+                    # Check if ban is permanent or still active
+                    if ban.permanent or (
+                        ban.expires_on and ban.expires_on > current_time
+                    ):
+                        has_banned_player = True
+                        logger.info(
+                            f"Found banned player {player.steam_id} in match {match_id}"
+                        )
+                        break
+
+                if has_banned_player:
+                    break
+
+            if has_banned_player:
+                matches_with_banned_players.append(match_id)
+
+        logger.info(
+            f"Found {len(matches_with_banned_players)} matches with banned players out of {len(request.match_ids)} total matches"
+        )
+        return {"matches_with_banned_players": matches_with_banned_players}
+
+    except Exception as e:
+        logger.error(f"Error checking for banned players in matches: {str(e)}")
+        return {"matches_with_banned_players": [], "error": str(e)}
+
+
 if __name__ == "__main__":
     import uvicorn
 
