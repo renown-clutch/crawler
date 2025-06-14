@@ -207,11 +207,22 @@ class Ban(BaseModel):
     expires_on = DateTimeTZField(null=True)
     permanent = BooleanField(default=False)
 
+    # New fields for sync tracking
+    website_active = BooleanField(
+        default=True, index=True
+    )  # Is this ban still on the website?
+    last_seen_on_website = DateTimeTZField(
+        default=now, index=True
+    )  # When did we last see this ban on the website?
+    created_at = DateTimeTZField(default=now)  # When was this record created in our DB?
+
     class Meta:
         table_name = "ban"
         indexes = (
             (("player", "issued_on"), False),
             (("player", "permanent"), False),
+            (("website_active", "last_seen_on_website"), False),
+            (("player", "website_active"), False),
         )
 
 

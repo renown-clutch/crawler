@@ -179,7 +179,11 @@ async def get_user_bans(steam_id: int):
         logger.info(f"No player found with steam_id {steam_id}")
         return {"bans": []}
 
-    bans = Ban.select().where(Ban.player == player).order_by(Ban.issued_on.desc())
+    bans = (
+        Ban.select()
+        .where(Ban.player == player, Ban.website_active == True)
+        .order_by(Ban.issued_on.desc())
+    )
 
     result = {
         "bans": [

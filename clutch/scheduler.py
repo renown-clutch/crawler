@@ -8,7 +8,7 @@ from decouple import config
 from telegram import Bot
 
 from .browser_tools import check_renown_login, cleanup_browser, setup_browser
-from .crawl_banlist import process_new_bans
+from .crawl_banlist import sync_banlist
 from .crawl_matches import combined_match_crawler_job, crawl_new_matches
 from .crawl_users import user_crawl_job
 from .telegram_utils import send_alert
@@ -77,7 +77,7 @@ async def crawl_matches_job():
 
 
 async def crawl_banlist_job():
-    """Crawl the ban list and update the database."""
+    """Quick ban list sync job for regular updates."""
     # Clean up any existing task first
     await cleanup_task("crawl_banlist")
 
@@ -89,13 +89,39 @@ async def crawl_banlist_job():
             lambda: cleanup_browser(playwright, browser),
         )
 
-        await process_new_bans(context)
-        logger.info("Successfully crawled ban list")
+        await sync_banlist(context)
+        logger.info("Successfully synced ban list")
     except Exception as e:
-        logger.error(f"Error crawling ban list: {str(e)}")
-        await send_alert(f"Error crawling ban list: {str(e)}")
+        logger.error(f"Error syncing ban list: {str(e)}")
+        await send_alert(f"Error syncing ban list: {str(e)}")
     finally:
         await cleanup_task("crawl_banlist")
+
+
+async def audit_banlist_job():
+    """
+    Comprehensive ban audit job that runs daily at 6am.
+    Uses the same full sync approach but with more detailed logging for daily monitoring.
+    """
+    # Clean up any existing task first
+    await cleanup_task("audit_banlist")
+
+    playwright, browser, context = await setup_browser(include_cookies=True)
+    try:
+        # Store the cleanup function
+        _running_tasks["audit_banlist"] = (
+            None,
+            lambda: cleanup_browser(playwright, browser),
+        )
+
+        logger.info("Starting daily comprehensive ban audit...")
+        await sync_banlist(context)
+        logger.info("Successfully completed daily ban audit")
+    except Exception as e:
+        logger.error(f"Error during daily ban audit: {str(e)}")
+        await send_alert(f"Error during daily ban audit: {str(e)}")
+    finally:
+        await cleanup_task("audit_banlist")
 
 
 async def check_login_status_job():
@@ -230,13 +256,24 @@ scheduler.add_job(
 
 scheduler.add_job(
     crawl_banlist_job,
-    CronTrigger(minute=0),
+    CronTrigger(minute="*/15"),  # Run every 15 minutes for regular updates
     id="crawl_banlist",
-    name="Crawl banlist",
+    name="Sync banlist",
     replace_existing=True,
     misfire_grace_time=300,  # 5 minutes
     coalesce=True,
     next_run_time=datetime.now() + timedelta(seconds=15),
+)
+
+scheduler.add_job(
+    audit_banlist_job,
+    CronTrigger(hour=6, minute=0),  # Run daily at 6:00 AM
+    id="audit_banlist",
+    name="Daily comprehensive ban audit",
+    replace_existing=True,
+    misfire_grace_time=1800,  # 30 minutes grace time for this longer job
+    coalesce=True,
+    next_run_time=datetime.now() + timedelta(seconds=25),  # Start after other jobs
 )
 
 scheduler.add_job(
