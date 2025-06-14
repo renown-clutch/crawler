@@ -175,6 +175,30 @@ class UserCrawlTask(BaseModel):
         table_name = "user_crawl_task"
 
 
+class FriendsCrawlTask(BaseModel):
+    steam_id = BigIntegerField(unique=True, index=True)
+    last_crawled_at = DateTimeTZField(default=now, index=True)
+    friends_list = BinaryJSONField(
+        default=[], null=False
+    )  # Store the actual friends list
+    crawl_successful = BooleanField(default=False, index=True)
+    crawl_status = TextField(
+        null=False, index=True
+    )  # success, 404, private, no_friends, error, etc.
+    page_html = TextField(null=True)  # Store HTML for debugging if needed
+    friends_count = IntegerField(default=0, index=True)
+    new_friends_discovered = IntegerField(default=0)  # Count of new steam IDs found
+    error_message = TextField(null=True)
+
+    class Meta:
+        table_name = "friends_crawl_task"
+        indexes = (
+            (("steam_id", "last_crawled_at"), False),
+            (("crawl_successful", "last_crawled_at"), False),
+            (("friends_count", "last_crawled_at"), False),
+        )
+
+
 class Ban(BaseModel):
     player = ForeignKeyField(Player, backref="bans", index=True)
     category = TextField(null=False)
