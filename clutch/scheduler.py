@@ -273,18 +273,18 @@ scheduler.add_job(
     next_run_time=datetime.now() + timedelta(seconds=25),  # Start after other jobs
 )
 
-# scheduler.add_job(
-#     user_crawl_wrapper,
-#     trigger="interval",
-#     minutes=1,
-#     id="user_crawl",
-#     name="Crawl user profiles",
-#     replace_existing=True,
-#     misfire_grace_time=300,  # 5 minutes
-#     coalesce=True,
-#     next_run_time=datetime.now() + timedelta(seconds=20),
-#     max_instances=1,  # Ensure only one instance runs at a time
-# )
+scheduler.add_job(
+    user_crawl_wrapper,
+    trigger="interval",
+    minutes=1,
+    id="user_crawl",
+    name="Crawl user profiles",
+    replace_existing=True,
+    misfire_grace_time=300,  # 5 minutes
+    coalesce=True,
+    next_run_time=datetime.now() + timedelta(seconds=20),
+    max_instances=1,  # Ensure only one instance runs at a time
+)
 
 
 async def start_scheduler():
