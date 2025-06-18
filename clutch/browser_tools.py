@@ -30,7 +30,7 @@ async def setup_browser(
         )
     else:
         browser = await playwright.chromium.launch(
-            headless=should_use_remote(),
+            headless=True,
             slow_mo=100 if should_use_remote() else None,
         )
         context = await browser.new_context()

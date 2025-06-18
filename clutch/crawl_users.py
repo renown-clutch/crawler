@@ -581,6 +581,91 @@ async def create_user_crawl_task(steam_id: int) -> UserCrawlTask:
     return task
 
 
+def create_user_crawl_tasks_for_all_players(force_recreate: bool = False) -> int:
+    """Create UserCrawlTask entries for all existing players to force a complete recrawl.
+
+    Args:
+        force_recreate: If True, mark existing processed tasks as unprocessed to force recrawl
+
+    Returns:
+        Number of tasks created or updated
+    """
+    logger.info("Creating user crawl tasks for all existing players...")
+
+    all_players = Player.select()
+    total_players = all_players.count()
+
+    logger.info(f"Found {total_players:,} players to process")
+
+    tasks_created = 0
+    tasks_updated = 0
+    batch_size = 1000
+
+    # Process in batches to avoid long-running transactions
+    for i in range(0, total_players, batch_size):
+        batch_end = min(i + batch_size, total_players)
+        batch_num = i // batch_size + 1
+        logger.info(
+            f"Processing batch {batch_num}: players {i + 1}-{batch_end} of {total_players}"
+        )
+
+        batch_players = list(all_players.offset(i).limit(batch_size))
+        logger.info(
+            f"Batch {batch_num}: Loaded {len(batch_players)} players from database"
+        )
+
+        # Get existing tasks for this batch to avoid individual lookups
+        batch_steam_ids = [p.steam_id for p in batch_players]
+        existing_tasks = {
+            task.steam_id: task
+            for task in UserCrawlTask.select().where(
+                UserCrawlTask.steam_id.in_(batch_steam_ids)
+            )
+        }
+        logger.info(f"Batch {batch_num}: Found {len(existing_tasks)} existing tasks")
+
+        batch_created = 0
+        batch_updated = 0
+
+        with db.atomic():
+            for j, player in enumerate(batch_players):
+                if j % 100 == 0:  # Progress within batch
+                    logger.info(
+                        f"Batch {batch_num}: Processing player {j + 1}/{len(batch_players)}"
+                    )
+
+                existing_task = existing_tasks.get(player.steam_id)
+
+                if existing_task is None:
+                    # Create new task
+                    UserCrawlTask.create(
+                        steam_id=player.steam_id,
+                        page_html="",
+                        processed=False,
+                        error_occured=False,
+                    )
+                    batch_created += 1
+                    tasks_created += 1
+                elif force_recreate and existing_task.processed:
+                    # Mark as unprocessed to force recrawl
+                    existing_task.processed = False
+                    existing_task.error_occured = False
+                    existing_task.save()
+                    batch_updated += 1
+                    tasks_updated += 1
+
+        # Progress update
+        percentage = (batch_end / total_players) * 100
+        logger.info(
+            f"Batch {batch_num} complete: {batch_end}/{total_players} players processed ({percentage:.1f}%) - Created: {batch_created}, Updated: {batch_updated}"
+        )
+
+    logger.info(
+        f"✅ Processed {total_players:,} players: {tasks_created:,} new tasks created, {tasks_updated:,} existing tasks marked for recrawl"
+    )
+    return tasks_created + tasks_updated
+
+
 async def crawl_users_concurrent_batch(
     tasks: List[UserCrawlTask],
     contexts: List[BrowserContext],
@@ -983,6 +1068,21 @@ if __name__ == "__main__":
     parser.add_argument(
         "--stats", action="store_true", help="Show statistics before and after crawling"
     )
+    parser.add_argument(
+        "--create-tasks-for-all-players",
+        action="store_true",
+        help="Create UserCrawlTask entries for all existing players to enable complete recrawl",
+    )
+    parser.add_argument(
+        "--force-recrawl-all",
+        action="store_true",
+        help="Force recrawl of all players by marking existing processed tasks as unprocessed",
+    )
+    parser.add_argument(
+        "--stats-only",
+        action="store_true",
+        help="Only show statistics about user crawl tasks, don't crawl",
+    )
 
     args = parser.parse_args()
 
@@ -991,6 +1091,42 @@ if __name__ == "__main__":
         level=getattr(logging, args.log_level),
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     )
+
+    # Handle special operations first
+    if args.stats_only:
+        total_unprocessed = (
+            UserCrawlTask.select().where(UserCrawlTask.processed == False).count()
+        )
+        total_tasks = UserCrawlTask.select().count()
+        total_players = Player.select().count()
+
+        print("User Crawl Task Statistics:")
+        print(f"  Total players in database: {total_players:,}")
+        print(f"  Total user crawl tasks: {total_tasks:,}")
+        print(f"  Unprocessed tasks: {total_unprocessed:,}")
+        print(f"  Processed tasks: {total_tasks - total_unprocessed:,}")
+        print(
+            f"  Coverage: {(total_tasks / total_players * 100) if total_players > 0 else 0:.1f}%"
+        )
+        print(
+            f"  Processing rate: {((total_tasks - total_unprocessed) / total_tasks * 100) if total_tasks > 0 else 0:.1f}%"
+        )
+        exit(0)
+
+    if args.create_tasks_for_all_players or args.force_recrawl_all:
+        force_recreate = args.force_recrawl_all
+        logger.info(
+            f"Creating user crawl tasks for all players (force_recreate={force_recreate})"
+        )
+
+        tasks_affected = create_user_crawl_tasks_for_all_players(
+            force_recreate=force_recreate
+        )
+        logger.info(f"Operation complete: {tasks_affected} tasks affected")
+
+        if not (args.concurrent or not args.create_tasks_for_all_players):
+            # If we only wanted to create tasks, exit here
+            exit(0)
 
     mode = "concurrent" if args.concurrent else "sequential"
     workers_info = f" with {args.num_workers} workers" if args.concurrent else ""
