@@ -94,7 +94,7 @@ async def startup_event():
     chat_manager.set_connection_manager(manager)
 
     # Run the job in the background to not block API startup
-    asyncio.create_task(run_cache_invalidation_job(interval_seconds=60))
+    asyncio.create_task(run_cache_invalidation_job(interval_seconds=15))
     logger.info("Cache invalidation job started.")
 
 
