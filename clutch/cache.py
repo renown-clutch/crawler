@@ -169,6 +169,48 @@ class CacheManager:
 
         return decorator
 
+    def cached_conditional(
+        self, ttl_seconds: int = 300, cache_condition: Callable[[Any], bool] = None
+    ):
+        """Decorator to cache function results conditionally.
+
+        Args:
+            ttl_seconds: Time to live in seconds for the cache entry
+            cache_condition: Function that takes the result and returns True if it should be cached
+        """
+
+        def decorator(func: Callable[..., T]) -> Callable[..., T]:
+            @wraps(func)
+            async def wrapper(*args, **kwargs) -> T:
+                # Skip caching if ttl is 0 or negative
+                if ttl_seconds <= 0:
+                    return await func(*args, **kwargs)
+
+                cache_key = self._generate_key(func.__name__, *args, **kwargs)
+                cached_result = self.get(cache_key)
+
+                if cached_result is not None:
+                    logger.debug(f"Cache hit for {func.__name__}")
+                    return cached_result
+
+                logger.debug(f"Cache miss for {func.__name__}")
+                result = await func(*args, **kwargs)
+
+                # Only cache if condition is met
+                if cache_condition is None or cache_condition(result):
+                    self.set(cache_key, result, ttl_seconds)
+                    logger.debug(f"Cached result for {func.__name__}")
+                else:
+                    logger.debug(
+                        f"Skipped caching for {func.__name__} due to condition"
+                    )
+
+                return result
+
+            return wrapper
+
+        return decorator
+
 
 # Create a global cache manager instance
 cache_manager = CacheManager()

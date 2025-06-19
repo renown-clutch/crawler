@@ -367,17 +367,17 @@ async def get_users_faceit_elo_and_url(request: RankRequest):
 
 
 @app.get("/get_profile_data")
-@cache_manager.cached(ttl_seconds=600)  # Cache for 10 minutes
+@cache_manager.cached_conditional(
+    ttl_seconds=200,
+    cache_condition=lambda result: result.get("highest_elo") is not None,
+)
 async def get_profile_data(steam_id: int):
     logger.info(f"Getting profile data for user {steam_id}")
-    # Ensure user is in crawl queue if not in database
     player = await ensure_user_in_crawl_queue(steam_id)
 
     if player is None:
-        logger.info(f"No player found with steam_id {steam_id}")
         return {"highest_elo": None}
 
-    # Get all stats for this player
     player_stats = Stat.select().where(Stat.player == player)
 
     highest_elo = None
@@ -966,14 +966,22 @@ manager = ConnectionManager()
 
 
 @app.get("/get_user_renown_stats")
-@cache_manager.cached(ttl_seconds=300)
 async def get_user_renown_stats(steam_id: int):
     logger.info(f"Getting Renown stats for user {steam_id}")
+
+    # Check cache first
+    cache_key = cache_manager._generate_key("get_user_renown_stats", steam_id)
+    cached_result = cache_manager.get(cache_key)
+
+    if cached_result is not None:
+        logger.debug("Cache hit for get_user_renown_stats")
+        return cached_result
+
     # Ensure user is in crawl queue if not in database
     player = await ensure_user_in_crawl_queue(steam_id)
 
     if player is None:
-        logger.info(f"No player found with steam_id {steam_id}")
+        logger.info(f"No player found with steam_id {steam_id}, not caching result")
         return {
             "current_elo": None,
             "highest_elo": None,
@@ -1026,7 +1034,7 @@ async def get_user_renown_stats(steam_id: int):
     kd = round(total_kills / total_deaths, 2) if total_deaths > 0 else total_kills
     winrate = round((wins / total_games * 100), 2) if total_games > 0 else 0
 
-    return {
+    result = {
         "current_elo": current_elo,
         "highest_elo": highest_elo,
         "kd": kd,
@@ -1034,6 +1042,12 @@ async def get_user_renown_stats(steam_id: int):
         "total_games": total_games,
         "leaderboard_position": leaderboard_position,
     }
+
+    # Cache the result since we found the player
+    cache_manager.set(cache_key, result, 300)  # Cache for 5 minutes
+    logger.debug("Cached result for get_user_renown_stats")
+
+    return result
 
 
 class SessionAnalyticsRequest(BaseModel):
