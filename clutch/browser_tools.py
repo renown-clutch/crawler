@@ -1,14 +1,14 @@
-import os
 from typing import Tuple
+from decouple import config
 
 from playwright.async_api import Browser, BrowserContext, async_playwright
 
-BROWSERLESS_WS_ENDPOINT = os.getenv("BROWSERLESS_WS_ENDPOINT")
-RENOWN_AUTH_TOKEN = os.getenv("RENOWN_AUTH_TOKEN")
+BROWSERLESS_WS_ENDPOINT = config("BROWSERLESS_WS_ENDPOINT")
+RENOWN_AUTH_TOKEN = config("RENOWN_AUTH_TOKEN")
 if not RENOWN_AUTH_TOKEN:
     raise ValueError("RENOWN_AUTH_TOKEN is not set")
 
-ENV = os.getenv("ENV", "dev")
+ENV = config("ENV", default="dev")
 
 
 def should_use_remote() -> bool:
