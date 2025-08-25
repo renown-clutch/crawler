@@ -1,61 +1,45 @@
-FROM python:3.11-slim
+FROM python:3.11-slim-bookworm
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    postgresql-client \
-    gcc \
-    && rm -rf /var/lib/apt/lists/*
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    PYTHONIOENCODING=utf-8 \
+    PIP_NO_CACHE_DIR=1
 
-# Install browser dependencies for playwright
-RUN apt-get update && apt-get install -y \
-    libnss3 \
-    libnspr4 \
-    libatk1.0-0 \
-    libatk-bridge2.0-0 \
-    libcups2 \
-    libdrm2 \
-    libdbus-1-3 \
-    libxkbcommon0 \
-    libxcomposite1 \
-    libxdamage1 \
-    libxfixes3 \
-    libxrandr2 \
-    libgbm1 \
-    libpango-1.0-0 \
-    libcairo2 \
-    libasound2 \
-    libatspi2.0-0 \
-    && rm -rf /var/lib/apt/lists/*
+# System + browser deps in one layer
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    # your tools
+    postgresql-client gcc \
+    # Playwright/Chromium deps (Debian 12/bookworm names)
+    ca-certificates wget gnupg \
+    libasound2 libatk1.0-0 libatk-bridge2.0-0 libatspi2.0-0 \
+    libcairo2 libcups2 libdbus-1-3 libdrm2 libexpat1 \
+    libgbm1 libglib2.0-0 libgtk-3-0 libnspr4 libnss3 \
+    libpango-1.0-0 libx11-6 libx11-xcb1 libxcb1 libxcb-dri3-0 \
+    libxcomposite1 libxdamage1 libxext6 libxfixes3 libxrandr2 \
+    libxkbcommon0 libxshmfence1 libgdk-pixbuf-2.0-0 \
+    libjpeg62-turbo libwebp7 libvpx7 libenchant-2-2 \
+    fonts-unifont fonts-liberation fonts-dejavu-core \
+ && rm -rf /var/lib/apt/lists/*
 
-# Create and set working directory
 WORKDIR /app
 
-# Copy requirements first to leverage Docker cache
-COPY requirements.txt .
-
-# Create and activate virtual environment
+# venv
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
-# Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+# deps
+COPY requirements.txt .
+RUN pip install -r requirements.txt
 
-# Install playwright browser
+# Install the browser binaries (no install-deps!)
 RUN playwright install chromium
-RUN playwright install-deps
 
-# Copy application code
+# app
 COPY . .
 
-# Set environment variables
-ENV PYTHONUNBUFFERED=1
-ENV PYTHONIOENCODING=utf-8
+# simple runner
+RUN printf '%s\n' '#!/bin/bash' \
+  'python -u core.py 2>&1 | tee /app/app.log' \
+  'tail -f /app/app.log' > /app/run.sh && chmod +x /app/run.sh
 
-# Create a script to run the application with proper logging
-RUN echo '#!/bin/bash\n\
-    python -u core.py 2>&1 | tee /app/app.log\n\
-    tail -f /app/app.log' > /app/run.sh && \
-    chmod +x /app/run.sh
-
-# Command to run the application
-CMD ["/app/run.sh"] 
+CMD ["/app/run.sh"]
