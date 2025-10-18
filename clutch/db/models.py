@@ -42,7 +42,7 @@ class BaseModel(Model):
 
 class Player(BaseModel):
     steam_id = BigIntegerField(unique=True, index=True)
-    name = TextField(null=False, unique=True, index=True)
+    name = TextField(null=False, index=True)
     elo = IntegerField(default=-1, index=True)
     country = TextField(null=True)
     registered_since = DateTimeTZField(null=True)
