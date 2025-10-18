@@ -29,9 +29,17 @@ async def setup_browser(
             browser.contexts[0] if browser.contexts else await browser.new_context()
         )
     else:
+        # Launch browser with args to use /tmp for cache and user data
+        # Run headless in production, with GUI in dev
+        is_headless = ENV != "dev"
         browser = await playwright.chromium.launch(
-            headless=True,
+            headless=is_headless,
             slow_mo=100 if should_use_remote() else None,
+            args=[
+                "--disk-cache-dir=/tmp/chromium-cache",
+                "--user-data-dir=/tmp/chromium-user-data",
+                "--disable-dev-shm-usage",  # Use /tmp instead of /dev/shm
+            ],
         )
         context = await browser.new_context()
 

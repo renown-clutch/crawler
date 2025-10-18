@@ -37,9 +37,13 @@ RUN playwright install chromium
 # app
 COPY . .
 
-# simple runner
-RUN printf '%s\n' '#!/bin/bash' \
-  'python -u core.py 2>&1 | tee /app/app.log' \
-  'tail -f /app/app.log' > /app/run.sh && chmod +x /app/run.sh
+# Set environment variables for Chromium to use /tmp for cache and temp data
+# Note: PLAYWRIGHT_BROWSERS_PATH is NOT set to /tmp because browser binaries 
+# should stay in the image. Only runtime cache/temp data goes to /tmp.
+ENV XDG_CACHE_HOME=/tmp/.cache \
+    TMPDIR=/tmp \
+    TEMP=/tmp \
+    TMP=/tmp
 
-CMD ["/app/run.sh"]
+# Simple runner that logs to stdout only
+CMD ["python", "-u", "core.py"]
